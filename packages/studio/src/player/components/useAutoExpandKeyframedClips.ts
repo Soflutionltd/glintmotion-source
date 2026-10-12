@@ -3,6 +3,10 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore } from "../store/playerStore";
 import { useStudioShellContextOptional } from "../../contexts/StudioContext";
 import { animationContributesLane } from "./TimelinePropertyLanes";
+import { getDesktopHost } from "../../utils/desktopHost";
+
+/** The Glintmotion Mac app keeps the timeline simple: lanes open only on the clip's diamond. */
+const desktopHost = getDesktopHost() !== null;
 
 /**
  * Keyframed clips start expanded (AE/Figma default). Auto-expands each clip the
@@ -33,6 +37,7 @@ export function useAutoExpandKeyframedClips(gsapAnimations: Map<string, GsapAnim
   const projectId = useStudioShellContextOptional()?.projectId ?? null;
   const seen = useRef({ projectId, source: gsapAnimations, clips: new Set<string>() });
   useEffect(() => {
+    if (desktopHost) return;
     if (seen.current.projectId !== projectId) {
       const sourceChanged = seen.current.source !== gsapAnimations;
       seen.current = { projectId, source: gsapAnimations, clips: new Set() };

@@ -24,7 +24,7 @@ import { PANEL_IDS } from "./dock/panelRegistry";
 import { getDesktopHost } from "../utils/desktopHost";
 
 const desktopHost = getDesktopHost();
-const DESKTOP_DOCK_STORAGE_KEY = "glintmotion.dockLayout.v1";
+const DESKTOP_DOCK_STORAGE_KEY = "glintmotion.dockLayout.v2";
 
 type RenderClipContent = (
   element: TimelineElement,

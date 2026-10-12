@@ -5,6 +5,7 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Tooltip } from "../ui/Tooltip";
 import type { RenderJob } from "./useRenderQueue";
+import { DeliverMenu } from "../desktop/DeliverMenu";
 
 interface RenderQueueItemProps {
   job: RenderJob;
@@ -209,6 +210,9 @@ export const RenderQueueItem = memo(function RenderQueueItem({
             </>
           ) : (
             <>
+              {isComplete && !/(\.gif|_(reel|post|square|original)\.mp4)$/.test(job.filename) && (
+                <DeliverMenu filename={job.filename} />
+              )}
               {/* The tooltip explains the control whether or not it is
                   reachable; `disabled:` on the shared Button keeps pointer
                   events alive precisely so a disabled one can still say why. */}

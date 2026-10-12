@@ -8,6 +8,7 @@ import {
   Image,
   Layout,
   Monitor,
+  MusicNotes,
   Presentation,
   Rows,
   Sparkle,
@@ -34,6 +35,7 @@ const TAB_ICONS: Record<PanelId, Icon> = {
   slideshow: Presentation,
   projects: Rows,
   agent: Sparkle,
+  music: MusicNotes,
   files: FolderSimple,
 };
 

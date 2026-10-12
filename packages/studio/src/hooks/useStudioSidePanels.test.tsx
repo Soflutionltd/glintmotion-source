@@ -29,7 +29,9 @@ function Panels({ project }: { project: string }) {
   const right = { recordEdit: () => project } as unknown as ComponentProps<
     typeof StudioRightPanels
   >;
-  return useStudioSidePanels({} as ComponentProps<typeof StudioLeftPanels>, right, project);
+  return useStudioSidePanels({} as ComponentProps<typeof StudioLeftPanels>, right, project, {
+    onAddAudioAtStart: () => undefined,
+  });
 }
 
 describe("useStudioSidePanels", () => {

@@ -6,6 +6,7 @@ import type {
   ClaudeStatus,
   DesktopHost,
 } from "../../utils/desktopHost";
+import { hostErrorMessage } from "../../utils/desktopHost";
 import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
 
 type ChatItem =
@@ -85,10 +86,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
       .catch((reason: unknown) =>
         push({
           role: "status",
-          text: (reason instanceof Error ? reason.message : String(reason)).replace(
-            /^Error invoking remote method '[^']+': (Error: )?/,
-            "",
-          ),
+          text: hostErrorMessage(reason),
           error: true,
         }),
       )

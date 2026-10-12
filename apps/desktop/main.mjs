@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
+import { createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -510,6 +511,49 @@ ipcMain.handle("agent:stop", () => {
 ipcMain.handle("agent:reset", () => {
   if (studio) agentSessions.delete(studio.dir);
 });
+const elevenKey = createKeyStore(join(app.getPath("userData"), "elevenlabs.key"), safeStorage);
+let musicRunning = false;
+
+function openProjectDir() {
+  if (!studio) throw new Error("Aucun projet ouvert.");
+  return studio.dir;
+}
+
+ipcMain.handle("music:hasKey", () => elevenKey.has());
+ipcMain.handle("music:saveKey", (_event, key) => elevenKey.save(key));
+ipcMain.handle("music:clearKey", () => elevenKey.clear());
+ipcMain.handle("music:generate", async (_event, request) => {
+  if (musicRunning) throw new Error("Une musique est déjà en cours de génération.");
+  const projectDir = openProjectDir();
+  musicRunning = true;
+  try {
+    return await generateMusic({
+      projectDir,
+      prompt: request?.prompt,
+      seconds: request?.seconds,
+      apiKey: elevenKey.read(),
+    });
+  } finally {
+    musicRunning = false;
+  }
+});
+ipcMain.handle("deliver:render", (_event, request) =>
+  deliverRender({
+    projectDir: openProjectDir(),
+    filename: request?.filename,
+    preset: request?.preset,
+    color: request?.color,
+  }),
+);
+ipcMain.handle("deliver:reveal", (_event, file) => {
+  const projectDir = openProjectDir();
+  const path = String(file ?? "");
+  if (!path.startsWith(join(projectDir, "renders") + "/") || !existsSync(path)) {
+    throw new Error("Fichier introuvable dans les rendus du projet.");
+  }
+  shell.showItemInFolder(path);
+});
+
 ipcMain.handle("claude:status", () => claudeStatus());
 ipcMain.handle("claude:account", (_event, action) => runClaudeAccount(action));
 ipcMain.handle("claude:cancel", () => {

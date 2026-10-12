@@ -15,7 +15,7 @@ export const BASE_PANEL_IDS = [
 ] as const;
 
 /** Panels that need the Glintmotion desktop host (its project list and agent bridge). */
-const HOST_PANEL_IDS = ["projects", "agent", "files"] as const;
+const HOST_PANEL_IDS = ["projects", "agent", "music", "files"] as const;
 
 export const PANEL_IDS = [...BASE_PANEL_IDS, ...HOST_PANEL_IDS] as const;
 
@@ -63,6 +63,7 @@ export const PANEL_DEFINITIONS = {
   slideshow: { title: "Slideshow", zone: "right", reopen: { near: "design", direction: "within" } },
   projects: { title: "Projects", zone: "left", reopen: { near: "preview", direction: "left" } },
   agent: { title: "Agent", zone: "left", reopen: { near: "compositions", direction: "within" } },
+  music: { title: "Music", zone: "left", reopen: { near: "compositions", direction: "within" } },
   files: { title: "Files", zone: "right", reopen: { near: "design", direction: "within" } },
 } as const satisfies Record<PanelId, PanelDefinition>;
 

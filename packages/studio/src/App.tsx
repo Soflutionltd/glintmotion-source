@@ -494,6 +494,10 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
       onAddMediaOverlay: handleAddMediaOverlay,
     },
     projectId,
+    {
+      onAddAudioAtStart: (path: string) =>
+        timelineEditing.handleTimelineAssetDrop(path, { start: 0, track: 0 }),
+    },
   );
   if (resolving || waitingForServer || !projectId)
     return <StudioSplash waiting={waitingForServer} />;

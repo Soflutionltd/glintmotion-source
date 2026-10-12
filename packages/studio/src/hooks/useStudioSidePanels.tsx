@@ -9,17 +9,19 @@ export function useStudioSidePanels(
   left: ComponentProps<typeof StudioLeftPanels>,
   right: ComponentProps<typeof StudioRightPanels>,
   projectId: string | null,
+  host: ComponentProps<typeof StudioHostPanels>,
 ) {
   const stableLeft = useStableHandlers(left, projectId);
   const stableRight = useStableHandlers(right, projectId);
+  const stableHost = useStableHandlers(host, projectId);
   return useMemo(
     () => (
       <>
         <StudioLeftPanels {...stableLeft} />
         <StudioRightPanels {...stableRight} />
-        <StudioHostPanels />
+        <StudioHostPanels {...stableHost} />
       </>
     ),
-    [stableLeft, stableRight],
+    [stableLeft, stableRight, stableHost],
   );
 }

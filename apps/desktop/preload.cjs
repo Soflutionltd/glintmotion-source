@@ -15,6 +15,16 @@ contextBridge.exposeInMainWorld("glintmotion", {
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),
     open: () => ipcRenderer.invoke("mcp:open"),
   },
+  music: {
+    hasKey: () => ipcRenderer.invoke("music:hasKey"),
+    saveKey: (key) => ipcRenderer.invoke("music:saveKey", key),
+    clearKey: () => ipcRenderer.invoke("music:clearKey"),
+    generate: (request) => ipcRenderer.invoke("music:generate", request),
+  },
+  deliver: {
+    render: (request) => ipcRenderer.invoke("deliver:render", request),
+    reveal: (file) => ipcRenderer.invoke("deliver:reveal", file),
+  },
   claude: {
     status: () => ipcRenderer.invoke("claude:status"),
     account: (action) => ipcRenderer.invoke("claude:account", action),

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ArrowsClockwise,
   CaretDown,
@@ -9,6 +9,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { ClaudeAccountAction, ClaudeStatus } from "../../utils/desktopHost";
+import { useCloseOnOutside } from "./useCloseOnOutside";
 
 const PENDING_LABELS: Record<ClaudeAccountAction, string> = {
   install: "Installing Claude Code…",
@@ -46,22 +47,9 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
 }: ClaudeAccountMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  const roots = useMemo(() => [rootRef], []);
+  useCloseOnOutside(open, roots, close);
 
   const choose = (action: ClaudeAccountAction) => {
     setOpen(false);

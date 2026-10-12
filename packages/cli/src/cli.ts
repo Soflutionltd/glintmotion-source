@@ -75,10 +75,13 @@ try {
 
 // On macOS, multi-worker renders (CLI and preview studio) encode while they
 // capture. With that on, screenshot capture matches or beats drawElementImage
-// fast capture, so fast capture is off by default. Explicit values win.
+// fast capture, so fast capture is off by default. Chrome paints on the GPU
+// there, so each capture worker needs fewer CPU cores than the software-GPU
+// default assumes. Explicit values win.
 if (process.platform === "darwin") {
   process.env.HF_DE_PARALLEL_STREAM ??= "true";
   process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE ??= "false";
+  process.env.PRODUCER_CORES_PER_WORKER ??= "2";
 }
 
 // ── Lazy imports ────────────────────────────────────────────────────────────

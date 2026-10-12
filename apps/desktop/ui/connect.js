@@ -30,6 +30,28 @@ async function load() {
   }
 }
 
+const cliButton = document.getElementById("cli-install");
+
+function showCli(status) {
+  cliButton.textContent = status.installed ? "Installée" : "Installer";
+  cliButton.disabled = status.installed;
+  if (status.installed) {
+    document.getElementById("cli-help").textContent =
+      `Installée dans ${status.link}, un dossier que les terminaux du Mac ont dans leur PATH.`;
+  }
+}
+
+cliButton.addEventListener("click", async () => {
+  try {
+    showCli(await api.cli.install());
+    showToast("Commande installée");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+api.cli.status().then(showCli);
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     await api.mcp.copy(snippets[button.dataset.copy]);

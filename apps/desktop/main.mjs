@@ -1,6 +1,17 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -8,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
+import { CLI_COMMANDS } from "./agent-tools.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -19,6 +31,8 @@ app.setName(APP_NAME);
 const engineEntry = app.isPackaged
   ? join(process.resourcesPath, "engine", "node_modules", "@hyperframes", "cli", "bin", "hyperframes.mjs")
   : join(here, "..", "..", "packages", "cli", "bin", "hyperframes.mjs");
+const cliBinDir = app.isPackaged ? join(process.resourcesPath, "bin") : join(here, "bin");
+const CLI_LINK = join(homedir(), ".local", "bin", "glintmotion");
 
 // Finder launches apps with a minimal PATH; the engine needs Homebrew's ffmpeg.
 const engineEnv = {
@@ -206,7 +220,14 @@ const AGENT_SYSTEM_PROMPT = [
   "You are working inside Glintmotion, a motion design studio where each video is an HTML composition.",
   "The studio is open on this project and reloads the preview live whenever you save a file.",
   "Edit the composition files in place. Answer in the language the user writes in, briefly.",
+  "Run engine commands as `glintmotion <command>`: it is this app's engine, whereas `npx hyperframes` downloads another version.",
+  "Useful: `glintmotion check --json` after editing, `glintmotion timeline --json`, `glintmotion snapshot --at 2,5` to look at frames, `glintmotion beats --json`.",
+  "Do not render: the person exports from the studio.",
 ].join(" ");
+const AGENT_ALLOWED_TOOLS = [
+  "Bash(npm run check)",
+  ...CLI_COMMANDS.flatMap((command) => [`Bash(glintmotion ${command})`, `Bash(glintmotion ${command} *)`]),
+];
 
 /** @type {{ child: import("node:child_process").ChildProcess, dir: string } | null} */
 let agentRun = null;
@@ -405,7 +426,7 @@ function startAgent({ prompt, model }) {
     "--permission-mode",
     "acceptEdits",
     "--allowedTools",
-    "Bash(npm run check)",
+    ...AGENT_ALLOWED_TOOLS,
     "--append-system-prompt",
     AGENT_SYSTEM_PROMPT,
   ];
@@ -495,6 +516,36 @@ function openConnectWindow() {
   connectWin.loadFile(join(here, "ui", "connect.html"));
 }
 
+const cliTarget = () => join(cliBinDir, "glintmotion");
+
+function cliStatus() {
+  let installed = false;
+  try {
+    installed = lstatSync(CLI_LINK).isSymbolicLink() && readlinkSync(CLI_LINK) === cliTarget();
+  } catch {
+    installed = false;
+  }
+  return { installed, link: CLI_LINK };
+}
+
+function installCli() {
+  mkdirSync(dirname(CLI_LINK), { recursive: true });
+  let existing = null;
+  try {
+    existing = lstatSync(CLI_LINK);
+  } catch {
+    existing = null;
+  }
+  if (existing && !existing.isSymbolicLink()) {
+    throw new Error(`${CLI_LINK} existe déjà et n'est pas un lien : supprime-le d'abord.`);
+  }
+  if (existing) rmSync(CLI_LINK);
+  symlinkSync(cliTarget(), CLI_LINK);
+  return cliStatus();
+}
+
+ipcMain.handle("cli:status", () => cliStatus());
+ipcMain.handle("cli:install", () => installCli());
 ipcMain.handle("mcp:info", () => mcp);
 ipcMain.handle("mcp:copy", (_event, value) => clipboard.writeText(String(value)));
 ipcMain.handle("mcp:open", () => openConnectWindow());

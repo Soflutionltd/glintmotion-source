@@ -1,0 +1,19 @@
+#!/bin/sh
+# The Glintmotion engine on the command line: same commands as `npx hyperframes`,
+# run by the app's own runtime, so nothing is downloaded and versions never drift.
+set -e
+
+self=$(readlink -f "$0")
+bin_dir=$(dirname "$self")
+contents=$(cd "$bin_dir/../.." && pwd)
+
+export ELECTRON_RUN_AS_NODE=1 HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_NO_UPDATE_CHECK=1 DO_NOT_TRACK=1
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+if [ -x "$contents/MacOS/Glintmotion" ]; then
+  exec "$contents/MacOS/Glintmotion" \
+    "$contents/Resources/engine/node_modules/@hyperframes/cli/bin/hyperframes.mjs" "$@"
+fi
+
+# Checkout: apps/desktop/bin/glintmotion runs packages/cli with node.
+exec node "$bin_dir/../../../packages/cli/bin/hyperframes.mjs" "$@"

@@ -33,8 +33,8 @@ const [appPath] = await packager({
   icon: join(appDir, "build/icon.icns"),
   appBundleId: "com.soflution.glintmotion",
   appCategoryType: "public.app-category.video",
-  extraResource: [engineDir],
-  ignore: [/^\/stage($|\/)/, /^\/out($|\/)/, /^\/scripts($|\/)/, /^\/build($|\/)/, /^\/package-lock\.json$/],
+  extraResource: [engineDir, join(appDir, "bin")],
+  ignore: [/^\/stage($|\/)/, /^\/out($|\/)/, /^\/scripts($|\/)/, /^\/build($|\/)/, /^\/bin($|\/)/, /^\/package-lock\.json$/],
   asar: true,
   osxSign: {
     identity,

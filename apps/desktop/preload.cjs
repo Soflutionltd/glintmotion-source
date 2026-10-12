@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld("glintmotion", {
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),
     open: () => ipcRenderer.invoke("mcp:open"),
   },
+  cli: {
+    status: () => ipcRenderer.invoke("cli:status"),
+    install: () => ipcRenderer.invoke("cli:install"),
+  },
   music: {
     hasKey: () => ipcRenderer.invoke("music:hasKey"),
     saveKey: (key) => ipcRenderer.invoke("music:saveKey", key),

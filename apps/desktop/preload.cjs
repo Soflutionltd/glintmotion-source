@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("glintmotion", {
   revealProject: (dir) => ipcRenderer.invoke("projects:reveal", dir),
   forgetProject: (dir) => ipcRenderer.invoke("projects:forget", dir),
   home: (action) => ipcRenderer.invoke("app:home", action),
+  mcp: {
+    info: () => ipcRenderer.invoke("mcp:info"),
+    copy: (value) => ipcRenderer.invoke("mcp:copy", value),
+    open: () => ipcRenderer.invoke("mcp:open"),
+  },
   agent: {
     models: () => ipcRenderer.invoke("agent:models"),
     send: (request) => ipcRenderer.invoke("agent:send", request),

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    />
+    <title>Connecter un agent</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="connect.css" />
+  </head>
+  <body class="connect">
+    <main class="connect-page">
+      <p class="eyebrow">Connecter</p>
+      <h1>Pilote Glintmotion depuis ton agent</h1>
+      <p class="lead">
+        Cursor, Claude Code ou tout agent compatible MCP peuvent ouvrir tes projets, regarder l'aperçu,
+        modifier les éléments et exporter la vidéo. Glintmotion doit rester ouvert.
+      </p>
+
+      <p id="connect-error" class="connect-error" hidden></p>
+
+      <section class="connect-card">
+        <div class="connect-head">
+          <h2>Cursor</h2>
+          <button type="button" class="btn btn-secondary btn-small" data-copy="cursor">Copier</button>
+        </div>
+        <p class="connect-help">À ajouter dans <code>~/.cursor/mcp.json</code>, sous <code>mcpServers</code>.</p>
+        <pre id="snippet-cursor"></pre>
+      </section>
+
+      <section class="connect-card">
+        <div class="connect-head">
+          <h2>Claude Code</h2>
+          <button type="button" class="btn btn-secondary btn-small" data-copy="claude">Copier</button>
+        </div>
+        <p class="connect-help">À coller dans un terminal, une seule fois.</p>
+        <pre id="snippet-claude"></pre>
+      </section>
+
+      <section class="connect-card">
+        <div class="connect-head">
+          <h2>Autre agent</h2>
+          <button type="button" class="btn btn-secondary btn-small" data-copy="raw">Copier</button>
+        </div>
+        <p class="connect-help">Serveur MCP en HTTP, avec cet en-tête d'autorisation.</p>
+        <pre id="snippet-raw"></pre>
+      </section>
+
+      <p class="footnote">
+        Le serveur n'écoute que sur ce Mac. Le jeton reste dans les réglages de Glintmotion :
+        ne le partage pas.
+      </p>
+    </main>
+    <div id="toast" class="toast" hidden></div>
+    <script src="connect.js"></script>
+  </body>
+</html>

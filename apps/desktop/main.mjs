@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -42,8 +43,12 @@ document.addEventListener("click", (event) => {
 
 /** @type {BrowserWindow | null} */
 let win = null;
-/** @type {{ child: import("node:child_process").ChildProcess, dir: string } | null} */
+/** @type {{ child: import("node:child_process").ChildProcess, dir: string, url: string | null } | null} */
 let studio = null;
+/** @type {{ url: string, token: string, error: string | null } | null} */
+let mcp = null;
+/** @type {BrowserWindow | null} */
+let connectWin = null;
 
 const recentsFile = () => join(app.getPath("userData"), "recents.json");
 
@@ -111,7 +116,7 @@ async function openStudio(dir) {
   stopStudio();
   const port = await freePort();
   const child = runEngine(["preview", dir, "--no-open", "--foreground", "--force-new", "--port", String(port)], dir);
-  studio = { child, dir };
+  studio = { child, dir, url: null };
 
   const url = await new Promise((resolve, reject) => {
     let output = "";
@@ -132,6 +137,7 @@ async function openStudio(dir) {
     });
   });
 
+  studio.url = url;
   rememberProject(dir);
   win.setTitle(`${APP_NAME} · ${basename(dir)}`);
   await win.loadURL(url);
@@ -310,6 +316,69 @@ function startAgent({ prompt, model }) {
   });
 }
 
+function renderOpenProject({ format = "mp4", from, to }) {
+  if (!studio) throw new Error("No project is open in Glintmotion.");
+  if (!["mp4", "webm", "mov", "gif"].includes(format)) throw new Error(`Unsupported format: ${format}`);
+  const dir = studio.dir;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const output = join(dir, "renders", `${basename(dir)}_${stamp}.${format}`);
+  const args = ["render", dir, "--format", format, "--output", output];
+  if (typeof from === "number") args.push("--from", String(from));
+  if (typeof to === "number") args.push("--to", String(to));
+  return new Promise((resolve, reject) => {
+    const child = runEngine(args, dir);
+    let log = "";
+    child.stdout.on("data", (chunk) => (log += chunk));
+    child.stderr.on("data", (chunk) => (log += chunk));
+    child.on("exit", (code) => {
+      if (code === 0 && existsSync(output)) resolve(output);
+      else reject(new Error(`Render failed (code ${code}). ${log.slice(-600)}`));
+    });
+  });
+}
+
+function startMcp() {
+  const token = loadMcpToken(join(app.getPath("userData"), "mcp-token"));
+  const server = startMcpServer({
+    token,
+    window: () => win,
+    studioUrl: () => studio?.url ?? null,
+    listProjects: () => readRecents().map((r) => projectInfo(r.path, r.openedAt)),
+    currentProject: () => (studio ? projectInfo(studio.dir, null) : null),
+    openProject: (dir) => openStudio(dir),
+    render: renderOpenProject,
+  });
+  mcp = { url: server.url, token, error: null };
+  server.http.on("error", (error) => {
+    mcp.error =
+      error.code === "EADDRINUSE"
+        ? `Le port ${new URL(server.url).port} est déjà pris par une autre application.`
+        : error.message;
+  });
+}
+
+function openConnectWindow() {
+  if (connectWin) {
+    connectWin.focus();
+    return;
+  }
+  connectWin = new BrowserWindow({
+    width: 640,
+    height: 680,
+    resizable: false,
+    title: "Connecter un agent",
+    backgroundColor: "#f1f0ec",
+    parent: win ?? undefined,
+    webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, sandbox: true },
+  });
+  connectWin.on("closed", () => (connectWin = null));
+  connectWin.loadFile(join(here, "ui", "connect.html"));
+}
+
+ipcMain.handle("mcp:info", () => mcp);
+ipcMain.handle("mcp:copy", (_event, value) => clipboard.writeText(String(value)));
+ipcMain.handle("mcp:open", () => openConnectWindow());
+
 ipcMain.handle("agent:models", () => AGENT_MODELS);
 ipcMain.handle("agent:send", (_event, request) => startAgent(request ?? {}));
 ipcMain.handle("agent:stop", () => {
@@ -341,6 +410,10 @@ function buildMenu() {
         { type: "separator" },
         { role: "close" },
       ],
+    },
+    {
+      label: "Connecter",
+      submenu: [{ label: "Connecter un agent (MCP)…", click: () => openConnectWindow() }],
     },
     { role: "editMenu" },
     { role: "viewMenu" },
@@ -382,6 +455,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  startMcp();
   buildMenu();
   createWindow();
   app.on("activate", () => {

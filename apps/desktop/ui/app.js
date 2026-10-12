@@ -178,6 +178,7 @@ document.querySelectorAll(".quick-card[data-format]").forEach((card) => {
 
 document.getElementById("open-folder").addEventListener("click", openFolder);
 document.getElementById("side-open").addEventListener("click", openFolder);
+document.getElementById("side-connect").addEventListener("click", () => api.mcp.open());
 document.getElementById("side-new").addEventListener("click", () => startNewProject());
 document.getElementById("cancel-new").addEventListener("click", () => dialog.close());
 document.getElementById("change-parent").addEventListener("click", async () => {

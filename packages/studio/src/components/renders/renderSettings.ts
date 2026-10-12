@@ -18,13 +18,13 @@ export function getPersistedRenderSettings(): PersistedRenderSettings {
           ? parsed.quality
           : "standard",
         fps: [24, 30, 60].includes(parsed.fps) ? parsed.fps : 30,
-        gpu: parsed.gpu === true,
+        gpu: parsed.gpu !== false,
       };
     }
   } catch {
     /* ignore */
   }
-  return { format: "mp4", quality: "standard", fps: 30, gpu: false };
+  return { format: "mp4", quality: "standard", fps: 30, gpu: true };
 }
 
 export function persistRenderSettings(

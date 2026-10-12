@@ -450,7 +450,7 @@ export function createRenderPlan(args: RenderCommandArgs, now = new Date()): Ren
     : join(rendersDir, `${project.name}_${timestamp}${ext}`);
 
   const useDocker = args.docker ?? false;
-  const useGpu = args.gpu ?? false;
+  const useGpu = args.gpu ?? (format === "mp4" && !useDocker);
   const browserGpuMode = resolveBrowserGpuForCli(useDocker, args["browser-gpu"]);
   if (useDocker && args["browser-gpu"] === true) {
     errorBox(

@@ -239,7 +239,11 @@ export default defineCommand({
       description:
         "libvpx-vp9 -cpu-used value for WebM encodes (-8 to 8). Higher is faster with a larger quality/size tradeoff. Env: PRODUCER_VP9_CPU_USED.",
     },
-    gpu: { type: "boolean", description: "Use GPU encoding", default: false },
+    gpu: {
+      type: "boolean",
+      description:
+        "Use GPU encoding. Default: on for local MP4 renders (CPU fallback when no GPU encoder is available). --no-gpu forces CPU.",
+    },
     "browser-gpu": {
       type: "boolean",
       description:

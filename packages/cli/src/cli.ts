@@ -73,6 +73,12 @@ try {
   /* .env not present — fine, env vars may be set another way */
 }
 
+// On macOS, multi-worker renders (CLI and preview studio) encode while they
+// capture. An explicit HF_DE_PARALLEL_STREAM, including "false", wins.
+if (process.platform === "darwin" && process.env.HF_DE_PARALLEL_STREAM === undefined) {
+  process.env.HF_DE_PARALLEL_STREAM = "true";
+}
+
 // ── Lazy imports ────────────────────────────────────────────────────────────
 // Telemetry, update checks, and heavy modules are imported only when needed.
 // For --help we skip telemetry entirely.

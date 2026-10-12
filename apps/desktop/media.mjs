@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 
 const ELEVEN_MUSIC_URL = "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192";
 const MUSIC_TIMEOUT_MS = 5 * 60_000;
@@ -26,13 +26,38 @@ function findFfmpeg() {
   return found;
 }
 
-function runFfmpeg(args) {
+function findFfprobe() {
+  const found = FFMPEG_CANDIDATES.map((candidate) => join(dirname(candidate), "ffprobe")).find((candidate) =>
+    existsSync(candidate),
+  );
+  if (!found) throw new Error("ffprobe est introuvable sur ce Mac (brew install ffmpeg).");
+  return found;
+}
+
+export function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(findFfmpeg(), ["-hide_banner", ...args], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
     child.on("error", reject);
     child.on("exit", (code) => resolve({ code, stderr }));
+  });
+}
+
+/** ffprobe's JSON description of a media file (format and streams). */
+export function probeMedia(file) {
+  return new Promise((resolve, reject) => {
+    const args = ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file];
+    const child = spawn(findFfprobe(), args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve(JSON.parse(stdout));
+      else reject(new Error(`ffprobe n'a pas pu lire ${basename(file)}. ${stderr.slice(-300)}`.trim()));
+    });
   });
 }
 

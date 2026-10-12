@@ -1,0 +1,645 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
+
+/** Engine commands an agent may run. Rendering has its own job tool; the rest open UIs, accounts or the network. */
+export const CLI_COMMANDS = [
+  "add",
+  "beats",
+  "catalog",
+  "check",
+  "clean",
+  "compare",
+  "compositions",
+  "doctor",
+  "history",
+  "info",
+  "inspect",
+  "keyframes",
+  "layout",
+  "lint",
+  "media-treatment",
+  "media-use",
+  "normalize-audio",
+  "remove-background",
+  "snapshot",
+  "timeline",
+  "transcribe",
+  "tts",
+];
+const CLI_TIMEOUT_S = 120;
+const CLI_MAX_TIMEOUT_S = 900;
+const OUTPUT_TAIL = 30_000;
+const RENDER_WAIT_S = 50;
+const MAX_WAIT_S = 600;
+const MAX_SHEET_FRAMES = 24;
+const FRAME_FETCH_PARALLEL = 3;
+const MEDIA_VIEWS = ["probe", "loudness", "waveform", "filmstrip"];
+const SESSION_ACTIONS = ["begin", "end", "undo", "changes", "list", "show"];
+
+export const text = (value) => ({
+  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
+});
+export const failure = (message) => ({ content: [{ type: "text", text: message }], isError: true });
+const image = (buffer, mimeType) => ({ type: "image", data: buffer.toString("base64"), mimeType });
+
+const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+const tail = (value, size) => (value.length > size ? `…${value.slice(-size)}` : value);
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
+function parseJson(output) {
+  const trimmed = output.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const last = trimmed.split("\n").reverse().find((line) => line.startsWith("{"));
+    try {
+      return last ? JSON.parse(last) : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function frameRate(value) {
+  const [num, den] = String(value ?? "").split("/").map(Number);
+  return num && den ? Math.round((num / den) * 1000) / 1000 : null;
+}
+
+function summarizeProbe(file, probe) {
+  const format = probe.format ?? {};
+  return {
+    file,
+    container: format.format_name ?? null,
+    durationSeconds: Number(format.duration) || null,
+    sizeBytes: Number(format.size) || null,
+    bitRate: Number(format.bit_rate) || null,
+    streams: (probe.streams ?? []).map((stream) => ({
+      index: stream.index,
+      type: stream.codec_type,
+      codec: stream.codec_name,
+      durationSeconds: Number(stream.duration) || null,
+      ...(stream.codec_type === "video" && {
+        width: stream.width,
+        height: stream.height,
+        fps: frameRate(stream.avg_frame_rate),
+        pixelFormat: stream.pix_fmt,
+        // VP9 in WebM keeps alpha in a side stream and only says so in a tag.
+        alpha:
+          /^(yuva|gbrap|ya\d|rgba|argb|bgra|abgr)/.test(String(stream.pix_fmt ?? "")) ||
+          stream.tags?.alpha_mode === "1",
+      }),
+      ...(stream.codec_type === "audio" && {
+        sampleRate: Number(stream.sample_rate) || null,
+        channels: stream.channels,
+        channelLayout: stream.channel_layout ?? null,
+      }),
+    })),
+  };
+}
+
+function loudnessOf(stderr) {
+  const summary = stderr.slice(stderr.lastIndexOf("Summary:"));
+  const read = (pattern) => {
+    const match = pattern.exec(summary);
+    return match ? Number(match[1]) : null;
+  };
+  return {
+    integratedLufs: read(/I:\s+(-?[\d.]+) LUFS/),
+    loudnessRangeLu: read(/LRA:\s+(-?[\d.]+) LU/),
+    truePeakDbfs: read(/Peak:\s+(-?[\d.]+) dBFS/),
+  };
+}
+
+export const AGENT_TOOLS = [
+  {
+    name: "glintmotion_create_project",
+    description:
+      "Create a new, blank Glintmotion project folder and open it in the studio. Returns its path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Folder name: letters, digits, spaces, dashes, dots." },
+        resolution: { type: "string", enum: ["portrait", "landscape", "square"], default: "portrait" },
+        parent: { type: "string", description: "Absolute folder to create it in. Default ~/Movies/Glintmotion." },
+        open: { type: "boolean", default: true },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "glintmotion_session",
+    description: [
+      "Group your edits into one undoable turn in the project's history, and see what the person changed.",
+      "begin {label} before editing; end when done; undo reverts your whole last turn (or one `entry`);",
+      "changes lists what was changed since your last turn (by the person or other agents);",
+      "list shows the newest entries; show {entry, diff} shows one entry's files.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: SESSION_ACTIONS },
+        label: { type: "string", description: "For begin: what this turn does, e.g. 'Tighten intro timing'." },
+        agent: { type: "string", description: "Your name in the history. Default 'Agent'." },
+        entry: { type: "string", description: "For undo/show: an entry id (or prefix) from list." },
+        diff: { type: "boolean", description: "For show: include a text diff." },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "glintmotion_check",
+    description: [
+      "Audit the open project the way a reviewer would: lint, layout overlaps, text contrast, broken or",
+      "browser-hostile media, sampled across the timeline. Returns the engine's JSON report.",
+      "Run it after editing and before rendering.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        strict: { type: "boolean", description: "Also fail on warnings." },
+        at: { type: "array", items: { type: "number", minimum: 0 }, description: "Extra times to sample (s)." },
+      },
+    },
+  },
+  {
+    name: "glintmotion_contact_sheet",
+    description: [
+      "One image showing the whole video as a grid of frames, so you can judge pacing, layout and",
+      "consistency at a glance instead of capturing frames one by one. Frames are rendered from the files",
+      "on disk. Saved under snapshots/ and returned as an image with the time of each tile (row by row).",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        count: { type: "integer", minimum: 1, maximum: MAX_SHEET_FRAMES, default: 8 },
+        times: {
+          type: "array",
+          items: { type: "number", minimum: 0 },
+          maxItems: MAX_SHEET_FRAMES,
+          description: "Exact times in seconds instead of evenly spaced ones.",
+        },
+        columns: { type: "integer", minimum: 1, maximum: 8, default: 4 },
+        width: { type: "integer", minimum: 120, maximum: 960, default: 360, description: "Tile width (px)." },
+      },
+    },
+  },
+  {
+    name: "glintmotion_inspect_media",
+    description: [
+      "Understand a media file before using it: probe (codec, size, duration, fps, alpha, audio layout),",
+      "loudness (integrated LUFS, range, true peak), waveform (image of the audio), filmstrip (image of",
+      "8 frames across a video). For beats run glintmotion_cli ['beats','--json']; for words,",
+      "['transcribe', file, '--json'].",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Project-relative path, or an absolute path on this Mac." },
+        views: { type: "array", items: { type: "string", enum: MEDIA_VIEWS }, default: ["probe"] },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "glintmotion_generate_music",
+    description: [
+      "Compose an instrumental music bed with ElevenLabs (key set by the user in the Music panel),",
+      "levelled to -16 LUFS with a fade-out, saved under assets/music/ and placed on the timeline.",
+      "Takes 20 s to 2 min.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Style, mood, tempo, instruments." },
+        seconds: { type: "number", minimum: 3, maximum: 600, description: "Usually the video's duration." },
+        start: { type: "number", minimum: 0, default: 0 },
+        track: { type: "integer", minimum: 0, description: "Default: a new track below the others." },
+        place: { type: "boolean", default: true, description: "false = only save the file." },
+      },
+      required: ["prompt", "seconds"],
+    },
+  },
+  {
+    name: "glintmotion_render",
+    description: [
+      "Export the open project with the Glintmotion engine, as a background job.",
+      `Waits up to wait_seconds (default ${RENDER_WAIT_S}) and returns the output path if it finished,`,
+      "otherwise the job id and progress: then call glintmotion_render_status. One render at a time.",
+      "`variables` fills the composition's data-composition-variables; `batch` renders one file per row.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        format: { type: "string", enum: ["mp4", "webm", "mov", "gif"], default: "mp4" },
+        quality: { type: "string", enum: ["draft", "looks", "delivery"], default: "looks" },
+        fps: { type: "number", minimum: 1, maximum: 240 },
+        resolution: {
+          type: "string",
+          enum: ["landscape", "portrait", "square", "landscape-4k", "portrait-4k", "square-4k"],
+        },
+        composition: { type: "string", description: "Project-relative composition file. Default index.html." },
+        from: { type: "number", minimum: 0, description: "Start time in seconds." },
+        to: { type: "number", minimum: 0, description: "End time in seconds." },
+        variables: { type: "object", description: "Variable values for this render." },
+        batch: {
+          type: "array",
+          items: { type: "object" },
+          description: "Variable rows; outputs land in renders/<project>_<stamp>/<index>.<format>.",
+        },
+        wait_seconds: { type: "number", minimum: 0, maximum: MAX_WAIT_S },
+      },
+    },
+  },
+  {
+    name: "glintmotion_render_status",
+    description:
+      "Progress of a render job (status, %, stage, output). Waits up to wait_seconds for it to finish. Without `job`, lists recent jobs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job: { type: "string" },
+        wait_seconds: { type: "number", minimum: 0, maximum: MAX_WAIT_S, default: 0 },
+      },
+    },
+  },
+  {
+    name: "glintmotion_render_cancel",
+    description: "Stop a running render job.",
+    inputSchema: { type: "object", properties: { job: { type: "string" } }, required: ["job"] },
+  },
+  {
+    name: "glintmotion_deliver",
+    description: [
+      "Make a social-ready copy of a finished render: framed to the preset (padding in `color`), HEVC,",
+      "audio mixed to -14 LUFS. Returns the new file's path in renders/.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        render: { type: "string", description: "A file in the project's renders/ folder (name or path)." },
+        preset: { type: "string", enum: Object.keys(DELIVERY_PRESETS) },
+        color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$", default: "#000000" },
+      },
+      required: ["render", "preset"],
+    },
+  },
+  {
+    name: "glintmotion_cli",
+    description: [
+      "Run a Glintmotion engine command in the open project (or `dir`) and return its output, parsed when",
+      "it is JSON. Pass --json where the command supports it. Useful: timeline --json, timeline move/trim/split,",
+      "keyframes --json, beats --json, transcribe <file> --json, tts, snapshot --at 1,2.5, compositions,",
+      "catalog --query, add <block>, lint, layout, inspect, normalize-audio, doctor --json.",
+      `Allowed commands: ${CLI_COMMANDS.join(", ")}. Run '<command> --help' for flags.`,
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        args: { type: "array", items: { type: "string" }, minItems: 1, description: "e.g. ['timeline','--json']" },
+        dir: { type: "string", description: "Absolute folder to run in. Default: the open project." },
+        timeout_seconds: { type: "number", minimum: 1, maximum: CLI_MAX_TIMEOUT_S, default: CLI_TIMEOUT_S },
+      },
+      required: ["args"],
+    },
+  },
+];
+
+export const MCP_INSTRUCTIONS = [
+  "Glintmotion edits motion-design videos written as HTML (HyperFrames compositions) in the Glintmotion desktop app, while the person watches the studio.",
+  "Loop that works:",
+  "1. glintmotion_current_project (or glintmotion_open_project / glintmotion_create_project).",
+  "2. glintmotion_session begin with a label, so the person can undo your whole turn in one step.",
+  "3. Look: studio_look for the structure, glintmotion_contact_sheet for the whole video, studio_frame for one instant.",
+  "4. Edit with the studio_* tools (timeline, text, style, animation) or by editing the project files; the studio reloads.",
+  "5. Verify: glintmotion_check, then a contact sheet. Fix what they show before going on.",
+  "6. glintmotion_session end.",
+  "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
+  "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
+  "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
+].join("\n");
+
+/**
+ * @param {{
+ *   projectDir: () => string,
+ *   projectInfo: () => { duration: number | null } | null,
+ *   runEngine: (args: string[], cwd: string) => import("node:child_process").ChildProcess,
+ *   studioCall: (name: string, args: object) => Promise<any>,
+ *   studioUrl: () => string | null,
+ *   generateMusic: (request: { prompt: string, seconds: number }) => Promise<string>,
+ *   deliver: (request: { filename: string, preset: string, color: string }) => Promise<string>,
+ *   createProject: (request: { name: string, parent: string, resolution: string }) => Promise<string>,
+ *   openProject: (dir: string) => Promise<void>,
+ *   defaultParent: string,
+ *   renders: ReturnType<typeof import("./render-jobs.mjs").createRenderJobs>,
+ * }} app
+ */
+export function createAgentTools(app) {
+  function runCaptured(args, cwd, timeoutSeconds) {
+    return new Promise((resolve) => {
+      const child = app.runEngine(args, cwd);
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      let settled = false;
+      const done = (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr, timedOut });
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, timeoutSeconds * 1000);
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("error", (error) => {
+        stderr += error.message;
+        done(null);
+      });
+      child.on("exit", (code) => done(code));
+    });
+  }
+
+  function folder(dir) {
+    if (dir === undefined) return app.projectDir();
+    const path = String(dir);
+    if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
+      throw new Error("dir must be an absolute path to an existing folder.");
+    }
+    return path;
+  }
+
+  function mediaFile(path) {
+    const value = String(path ?? "");
+    if (!value) throw new Error("path is required.");
+    const file = isAbsolute(value) ? value : join(app.projectDir(), normalize(value));
+    if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`No file at ${value}.`);
+    return file;
+  }
+
+  async function cli({ args, dir, timeout_seconds }) {
+    if (!Array.isArray(args) || args.length === 0 || !args.every((arg) => typeof arg === "string")) {
+      return failure("args must be a non-empty array of strings, e.g. ['timeline','--json'].");
+    }
+    if (!CLI_COMMANDS.includes(args[0])) {
+      return failure(
+        `'${args[0]}' is not available here. Allowed: ${CLI_COMMANDS.join(", ")}. Render with glintmotion_render.`,
+      );
+    }
+    const timeout = clampNumber(timeout_seconds, 1, CLI_MAX_TIMEOUT_S, CLI_TIMEOUT_S);
+    const run = await runCaptured(args, folder(dir), timeout);
+    const json = parseJson(run.stdout);
+    const reply = text({
+      exitCode: run.code,
+      ...(run.timedOut && { timedOut: `stopped after ${timeout} s` }),
+      ...(json ? { json } : { stdout: tail(run.stdout, OUTPUT_TAIL) }),
+      ...(run.stderr.trim() && { stderr: tail(run.stderr, 4000) }),
+    });
+    return run.code === 0 ? reply : { ...reply, isError: true };
+  }
+
+  async function check({ strict, at }) {
+    const dir = app.projectDir();
+    const args = ["check", dir, "--json"];
+    if (strict) args.push("--strict");
+    if (Array.isArray(at) && at.length) args.push("--at", at.map(Number).filter(Number.isFinite).join(","));
+    const run = await runCaptured(args, dir, 300);
+    const report = parseJson(run.stdout);
+    if (!report) return failure(`check produced no report (code ${run.code}). ${tail(run.stderr, 1500)}`);
+    return text(report);
+  }
+
+  async function fetchFrames(base, times, work) {
+    for (let index = 0; index < times.length; index += FRAME_FETCH_PARALLEL) {
+      const slice = times.slice(index, index + FRAME_FETCH_PARALLEL);
+      await Promise.all(
+        slice.map(async (time, offset) => {
+          const url = new URL(base);
+          url.searchParams.set("t", time.toFixed(3));
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`The frame at ${time} s failed to render (${response.status}).`);
+          const file = join(work, `f_${String(index + offset).padStart(3, "0")}.png`);
+          writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+        }),
+      );
+    }
+  }
+
+  function sheetTimes({ times, count }) {
+    if (Array.isArray(times) && times.length) {
+      const picked = times.map(Number).filter((time) => Number.isFinite(time) && time >= 0);
+      if (picked.length !== times.length) throw new Error("times must be non-negative numbers of seconds.");
+      return picked.slice(0, MAX_SHEET_FRAMES);
+    }
+    const duration = app.projectInfo()?.duration;
+    if (!duration) throw new Error("The project has no data-duration; pass `times` explicitly.");
+    const frames = Math.round(clampNumber(count, 1, MAX_SHEET_FRAMES, 8));
+    return Array.from({ length: frames }, (_, i) => Math.round(((i + 0.5) * duration * 1000) / frames) / 1000);
+  }
+
+  async function contactSheet(input) {
+    const dir = app.projectDir();
+    const times = sheetTimes(input);
+    const frame = await app.studioCall("studio_frame", {});
+    if (!frame?.ok) {
+      return failure(frame?.reason ? `The studio could not capture a frame: ${frame.reason}` : "The studio is still loading.");
+    }
+    const base = new URL(frame.url, app.studioUrl() ?? undefined);
+    const columns = Math.round(clampNumber(input.columns, 1, 8, Math.min(4, times.length)));
+    const rows = Math.ceil(times.length / columns);
+    const width = Math.round(clampNumber(input.width, 120, 960, 360));
+    const work = mkdtempSync(join(tmpdir(), "glintmotion-sheet-"));
+    try {
+      await fetchFrames(base, times, work);
+      mkdirSync(join(dir, "snapshots"), { recursive: true });
+      const output = join(dir, "snapshots", `contact_${stamp()}.jpg`);
+      const { code, stderr } = await runFfmpeg([
+        "-y",
+        "-framerate",
+        "1",
+        "-i",
+        join(work, "f_%03d.png"),
+        "-vf",
+        `scale=${width}:-2,tile=${columns}x${rows}:padding=8:margin=8:color=0x101010`,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "3",
+        output,
+      ]);
+      if (code !== 0) return failure(`The contact sheet could not be assembled. ${tail(stderr, 600)}`);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ output, columns, rows, times }) },
+          image(readFileSync(output), "image/jpeg"),
+        ],
+      };
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  async function mediaImage(args, extension) {
+    const work = mkdtempSync(join(tmpdir(), "glintmotion-media-"));
+    const output = join(work, `view.${extension}`);
+    try {
+      const { code, stderr } = await runFfmpeg([...args, output]);
+      if (code !== 0) throw new Error(tail(stderr, 400));
+      return image(readFileSync(output), extension === "png" ? "image/png" : "image/jpeg");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  async function inspectMedia({ path, views }) {
+    const wanted = Array.isArray(views) && views.length ? views : ["probe"];
+    const unknown = wanted.filter((view) => !MEDIA_VIEWS.includes(view));
+    if (unknown.length) return failure(`Unknown view ${unknown.join(", ")}. Use ${MEDIA_VIEWS.join(", ")}.`);
+    const file = mediaFile(path);
+    const summary = summarizeProbe(path, await probeMedia(file));
+    const hasAudio = summary.streams.some((stream) => stream.type === "audio");
+    const video = summary.streams.find((stream) => stream.type === "video");
+    const notes = [];
+    const images = [];
+    if (wanted.includes("loudness")) {
+      if (!hasAudio) notes.push("loudness: no audio stream");
+      else {
+        const run = await runFfmpeg(["-nostats", "-i", file, "-map", "0:a:0", "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"]);
+        summary.loudness = loudnessOf(run.stderr);
+      }
+    }
+    if (wanted.includes("waveform")) {
+      if (!hasAudio) notes.push("waveform: no audio stream");
+      else {
+        images.push(
+          await mediaImage(
+            ["-y", "-i", file, "-filter_complex", "[0:a:0]aformat=channel_layouts=mono,showwavespic=s=1200x240:colors=0x2dd4bf", "-frames:v", "1"],
+            "png",
+          ),
+        );
+      }
+    }
+    if (wanted.includes("filmstrip")) {
+      const duration = video?.durationSeconds ?? summary.durationSeconds;
+      if (!video || !duration) notes.push("filmstrip: no video stream with a duration");
+      else {
+        images.push(
+          await mediaImage(
+            ["-y", "-i", file, "-vf", `fps=${8 / duration},scale=240:-2,tile=8x1:padding=4:color=0x101010`, "-frames:v", "1", "-q:v", "4"],
+            "jpg",
+          ),
+        );
+      }
+    }
+    if (notes.length) summary.notes = notes;
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }, ...images] };
+  }
+
+  function sessionArgs({ action, label, agent, entry, diff }, dir) {
+    const who = String(agent ?? "Agent").trim() || "Agent";
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} _.-]{0,39}$/u.test(who)) throw new Error("agent: letters, digits, spaces, up to 40.");
+    const common = ["--dir", dir, "--json"];
+    switch (action) {
+      case "begin":
+        if (!String(label ?? "").trim()) throw new Error("begin needs a label.");
+        return ["history", "begin", "--who", who, "--label", String(label).trim(), ...common];
+      case "end":
+        return ["history", "end", ...common];
+      case "undo":
+        return ["history", "undo", ...(entry ? [String(entry)] : ["--who", who]), ...common];
+      case "changes":
+        return ["history", "--since", "mine", "--who", who, ...common];
+      case "list":
+        return ["history", "--limit", "20", ...common];
+      case "show":
+        if (!entry) throw new Error("show needs an entry id from list.");
+        return ["history", "show", String(entry), ...(diff ? ["--diff"] : []), ...common];
+      default:
+        throw new Error(`action is one of ${SESSION_ACTIONS.join(", ")}.`);
+    }
+  }
+
+  async function session(input) {
+    const dir = app.projectDir();
+    const run = await runCaptured(sessionArgs(input, dir), dir, 60);
+    const json = parseJson(run.stdout);
+    if (!json) return failure(tail(run.stderr.trim() || run.stdout.trim() || `history exited with ${run.code}`, 2000));
+    return run.code === 0 ? text(json) : { ...text(json), isError: true };
+  }
+
+  async function music({ prompt, seconds, start, track, place }) {
+    const path = await app.generateMusic({ prompt, seconds });
+    if (place === false) return text({ path });
+    const timeline = await app.studioCall("studio_add_media", {
+      path,
+      start: start ?? 0,
+      ...(track !== undefined && { track }),
+    });
+    return text({ path, timeline: timeline ?? { ok: false, reason: "the studio is not ready" } });
+  }
+
+  async function deliver({ render, preset, color }) {
+    let filename = String(render ?? "");
+    if (isAbsolute(filename)) {
+      if (dirname(filename) !== join(app.projectDir(), "renders")) {
+        return failure("render must be a file directly inside the project's renders/ folder.");
+      }
+      filename = basename(filename);
+    }
+    return text({ output: await app.deliver({ filename, preset, color: color ?? "#000000" }) });
+  }
+
+  async function createProject({ name, resolution, parent, open }) {
+    const folderPath = parent === undefined ? app.defaultParent : String(parent);
+    if (!isAbsolute(folderPath)) return failure("parent must be an absolute path.");
+    const dir = await app.createProject({ name, parent: folderPath, resolution: resolution ?? "portrait" });
+    if (open !== false) await app.openProject(dir);
+    return text({ path: dir, opened: open !== false });
+  }
+
+  function renderReply(job) {
+    const reply = text(
+      job.status === "running"
+        ? { ...job, hint: "Still rendering. Call glintmotion_render_status with this job and wait_seconds." }
+        : job,
+    );
+    return job.status === "failed" ? { ...reply, isError: true } : reply;
+  }
+
+  async function render(input) {
+    const job = app.renders.start(app.projectDir(), input);
+    return renderReply(await app.renders.wait(job.job, clampNumber(input.wait_seconds, 0, MAX_WAIT_S, RENDER_WAIT_S)));
+  }
+
+  async function renderStatus({ job, wait_seconds }) {
+    if (!job) return text({ jobs: app.renders.list() });
+    return renderReply(await app.renders.wait(job, clampNumber(wait_seconds, 0, MAX_WAIT_S, 0)));
+  }
+
+  const handlers = {
+    glintmotion_create_project: createProject,
+    glintmotion_session: session,
+    glintmotion_check: check,
+    glintmotion_contact_sheet: contactSheet,
+    glintmotion_inspect_media: inspectMedia,
+    glintmotion_generate_music: music,
+    glintmotion_render: render,
+    glintmotion_render_status: renderStatus,
+    glintmotion_render_cancel: ({ job }) => text(app.renders.cancel(job)),
+    glintmotion_deliver: deliver,
+    glintmotion_cli: cli,
+  };
+
+  return {
+    /** The tool's reply, or null when `name` is not one of these tools. */
+    call: (name, args) => (handlers[name] ? handlers[name](args ?? {}) : null),
+  };
+}

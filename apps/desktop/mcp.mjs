@@ -4,8 +4,9 @@ import { createServer } from "node:http";
 import { dirname } from "node:path";
 import { localhostHostValidation, NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { Server } from "@modelcontextprotocol/server";
+import { AGENT_TOOLS, createAgentTools, failure, MCP_INSTRUCTIONS, text } from "./agent-tools.mjs";
 
-export const MCP_PORT = 47821;
+export const MCP_PORT = Number(process.env.GLINTMOTION_MCP_PORT) || 47821;
 const MCP_PATH = "/mcp";
 const STUDIO_TOOLS = "window.__glintmotionStudioTools";
 
@@ -25,11 +26,6 @@ function authorized(header, token) {
   const given = Buffer.from(String(header ?? ""));
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
-
-const text = (value) => ({
-  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
-});
-const failure = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
 const APP_TOOLS = [
   {
@@ -57,30 +53,27 @@ const APP_TOOLS = [
     description: "A PNG screenshot of the Glintmotion window as the user sees it.",
     inputSchema: { type: "object", properties: {} },
   },
-  {
-    name: "glintmotion_render",
-    description:
-      "Export the open project to a video file with the Glintmotion engine and return the output path. Takes about as long as the video on a Mac.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        format: { type: "string", enum: ["mp4", "webm", "mov", "gif"], default: "mp4" },
-        from: { type: "number", description: "Start time in seconds (optional)." },
-        to: { type: "number", description: "End time in seconds (optional)." },
-      },
-    },
-  },
 ];
+
+function readToolCache(file) {
+  try {
+    const tools = JSON.parse(readFileSync(file, "utf-8"));
+    return Array.isArray(tools) ? tools : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * @param {{
  *   token: string,
+ *   toolCacheFile: string,
  *   window: () => import("electron").BrowserWindow | null,
  *   studioUrl: () => string | null,
  *   listProjects: () => unknown[],
  *   currentProject: () => unknown,
  *   openProject: (dir: string) => Promise<void>,
- *   render: (options: { format: string, from?: number, to?: number }) => Promise<string>,
+ *   agent: Omit<Parameters<typeof createAgentTools>[0], "studioCall" | "studioUrl" | "openProject">,
  * }} app
  */
 export function startMcpServer(app) {
@@ -89,12 +82,39 @@ export function startMcpServer(app) {
     return win && app.studioUrl() ? win.webContents : null;
   };
 
+  // Clients read tools/list once, often before a project is open: the last studio list is
+  // served from disk so the studio_* tools exist from the start and fail clearly until one opens.
+  let cachedStudioTools = readToolCache(app.toolCacheFile);
+
   async function studioTools() {
     const page = studioPage();
-    if (!page) return [];
-    const tools = await page.executeJavaScript(`${STUDIO_TOOLS} ? ${STUDIO_TOOLS}.list() : []`);
-    return tools.map((tool) => ({ ...tool, inputSchema: tool.inputSchema ?? { type: "object" } }));
+    const live = page ? await page.executeJavaScript(`${STUDIO_TOOLS} ? ${STUDIO_TOOLS}.list() : []`) : [];
+    if (live.length) {
+      const tools = live.map((tool) => ({ ...tool, inputSchema: tool.inputSchema ?? { type: "object" } }));
+      if (JSON.stringify(tools) !== JSON.stringify(cachedStudioTools)) {
+        cachedStudioTools = tools;
+        mkdirSync(dirname(app.toolCacheFile), { recursive: true });
+        writeFileSync(app.toolCacheFile, JSON.stringify(tools));
+      }
+    }
+    return cachedStudioTools;
   }
+
+  /** The studio tool's own result object, or null while the studio page is still loading. */
+  async function studioCall(name, args) {
+    const page = studioPage();
+    if (!page) throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
+    return page.executeJavaScript(
+      `${STUDIO_TOOLS} ? ${STUDIO_TOOLS}.call(${JSON.stringify(name)}, ${JSON.stringify(args ?? {})}) : null`,
+    );
+  }
+
+  const agentTools = createAgentTools({
+    ...app.agent,
+    studioCall,
+    studioUrl: app.studioUrl,
+    openProject: app.openProject,
+  });
 
   async function frameImage(result) {
     const base = app.studioUrl();
@@ -106,11 +126,7 @@ export function startMcpServer(app) {
   }
 
   async function callStudioTool(name, args) {
-    const page = studioPage();
-    if (!page) return failure("No project is open in Glintmotion. Call glintmotion_open_project first.");
-    const result = await page.executeJavaScript(
-      `${STUDIO_TOOLS} ? ${STUDIO_TOOLS}.call(${JSON.stringify(name)}, ${JSON.stringify(args ?? {})}) : null`,
-    );
+    const result = await studioCall(name, args);
     if (result == null) return failure("The studio is still loading. Try again in a moment.");
     const reply = text(result);
     if (name === "studio_frame" && result.ok) {
@@ -137,20 +153,18 @@ export function startMcpServer(app) {
         const image = await win.webContents.capturePage();
         return { content: [{ type: "image", data: image.toPNG().toString("base64"), mimeType: "image/png" }] };
       }
-      case "glintmotion_render":
-        return text({ output: await app.render(args ?? {}) });
       default:
-        return null;
+        return agentTools.call(name, args);
     }
   }
 
   function buildServer() {
     const server = new Server(
-      { name: "glintmotion", version: "0.1.0" },
-      { capabilities: { tools: {} } },
+      { name: "glintmotion", version: "0.2.0" },
+      { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS },
     );
     server.setRequestHandler("tools/list", async () => ({
-      tools: [...APP_TOOLS, ...(await studioTools())],
+      tools: [...APP_TOOLS, ...AGENT_TOOLS, ...(await studioTools())],
     }));
     server.setRequestHandler("tools/call", async (request) => {
       const { name, arguments: args } = request.params;

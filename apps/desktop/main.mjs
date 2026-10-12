@@ -7,6 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { createKeyStore, deliverRender, generateMusic } from "./media.mjs";
+import { createRenderJobs } from "./render-jobs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -440,37 +441,32 @@ function startAgent({ prompt, model }) {
   });
 }
 
-function renderOpenProject({ format = "mp4", from, to }) {
-  if (!studio) throw new Error("No project is open in Glintmotion.");
-  if (!["mp4", "webm", "mov", "gif"].includes(format)) throw new Error(`Unsupported format: ${format}`);
-  const dir = studio.dir;
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const output = join(dir, "renders", `${basename(dir)}_${stamp}.${format}`);
-  const args = ["render", dir, "--format", format, "--output", output];
-  if (typeof from === "number") args.push("--from", String(from));
-  if (typeof to === "number") args.push("--to", String(to));
-  return new Promise((resolve, reject) => {
-    const child = runEngine(args, dir);
-    let log = "";
-    child.stdout.on("data", (chunk) => (log += chunk));
-    child.stderr.on("data", (chunk) => (log += chunk));
-    child.on("exit", (code) => {
-      if (code === 0 && existsSync(output)) resolve(output);
-      else reject(new Error(`Render failed (code ${code}). ${log.slice(-600)}`));
-    });
-  });
-}
+const renders = createRenderJobs({ runEngine });
 
 function startMcp() {
   const token = loadMcpToken(join(app.getPath("userData"), "mcp-token"));
+  const agentProjectDir = () => {
+    if (!studio) throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
+    return studio.dir;
+  };
   const server = startMcpServer({
     token,
+    toolCacheFile: join(app.getPath("userData"), "studio-tools.json"),
     window: () => win,
     studioUrl: () => studio?.url ?? null,
     listProjects: () => readRecents().map((r) => projectInfo(r.path, r.openedAt)),
     currentProject: () => (studio ? projectInfo(studio.dir, null) : null),
     openProject: (dir) => openStudio(dir),
-    render: renderOpenProject,
+    agent: {
+      projectDir: agentProjectDir,
+      projectInfo: () => (studio ? projectInfo(studio.dir, null) : null),
+      runEngine,
+      renders,
+      generateMusic: composeMusic,
+      deliver: (request) => deliverRender({ projectDir: agentProjectDir(), ...request }),
+      createProject,
+      defaultParent: DEFAULT_PROJECTS_DIR,
+    },
   });
   mcp = { url: server.url, token, error: null };
   server.http.on("error", (error) => {
@@ -522,7 +518,7 @@ function openProjectDir() {
 ipcMain.handle("music:hasKey", () => elevenKey.has());
 ipcMain.handle("music:saveKey", (_event, key) => elevenKey.save(key));
 ipcMain.handle("music:clearKey", () => elevenKey.clear());
-ipcMain.handle("music:generate", async (_event, request) => {
+async function composeMusic(request) {
   if (musicRunning) throw new Error("Une musique est déjà en cours de génération.");
   const projectDir = openProjectDir();
   musicRunning = true;
@@ -536,7 +532,8 @@ ipcMain.handle("music:generate", async (_event, request) => {
   } finally {
     musicRunning = false;
   }
-});
+}
+ipcMain.handle("music:generate", (_event, request) => composeMusic(request));
 ipcMain.handle("deliver:render", (_event, request) =>
   deliverRender({
     projectDir: openProjectDir(),
@@ -640,5 +637,6 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   stopStudio();
+  renders.stopAll();
   accountRun?.child.kill("SIGTERM");
 });

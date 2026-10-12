@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    />
+    <title>Glintmotion</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="mark.svg" alt="" width="22" height="22" />
+        <span>Glintmotion</span>
+      </div>
+      <div class="side-card">
+        <nav>
+          <button class="nav-item" id="side-new"><span class="nav-icon">+</span>Nouveau projet</button>
+          <button class="nav-item is-active" data-view="projects"><span class="nav-icon">▦</span>Tous les projets <span class="count" id="project-count"></span></button>
+        </nav>
+        <p class="side-title">Récents</p>
+        <ul class="recents" id="recent-list"></ul>
+        <nav class="side-foot">
+          <button class="nav-item" id="side-open"><span class="nav-icon">↗</span>Ouvrir un dossier</button>
+          <button class="nav-item" data-view="about"><span class="nav-icon">i</span>À propos</button>
+        </nav>
+      </div>
+    </aside>
+
+    <main>
+      <section class="view is-active" id="view-projects">
+        <header class="page-head">
+          <h1>Qu'est-ce qu'on anime aujourd'hui ?</h1>
+          <p class="lead">Choisis un format pour démarrer, ou reprends un projet.</p>
+        </header>
+
+        <div class="quick">
+          <button class="quick-card" data-format="portrait">
+            <span class="quick-thumb"><span class="fmt fmt-portrait"></span></span>
+            <span class="quick-label">Vidéo verticale</span>
+            <span class="quick-sub">1080×1920 · Reels, TikTok, Stories</span>
+          </button>
+          <button class="quick-card" data-format="landscape">
+            <span class="quick-thumb"><span class="fmt fmt-landscape"></span></span>
+            <span class="quick-label">Vidéo horizontale</span>
+            <span class="quick-sub">1920×1080 · YouTube, site, démo</span>
+          </button>
+          <button class="quick-card" data-format="square">
+            <span class="quick-thumb"><span class="fmt fmt-square"></span></span>
+            <span class="quick-label">Vidéo carrée</span>
+            <span class="quick-sub">1080×1080 · fil Instagram</span>
+          </button>
+          <button class="quick-card quick-open" id="open-folder">
+            <span class="quick-thumb"><span class="quick-plus">↗</span></span>
+            <span class="quick-label">Ouvrir un dossier</span>
+            <span class="quick-sub">Un projet qui contient un index.html</span>
+          </button>
+        </div>
+
+        <h2 class="section-title" id="recent-title">Récents</h2>
+        <div class="grid" id="project-grid"></div>
+
+        <div class="empty" id="empty-state" hidden>
+          <img src="mark.svg" alt="" width="40" height="40" />
+          <p>Tes projets apparaîtront ici dès que tu en auras ouvert ou créé un.</p>
+        </div>
+      </section>
+
+      <section class="view about" id="view-about">
+        <div class="hero">
+          <p class="eyebrow">À propos</p>
+          <h1>Le motion design en HTML, exporté à pleine vitesse.</h1>
+          <p class="lead">
+            Glintmotion transforme une page HTML animée en vidéo. Tu décris la scène, l'agent
+            l'écrit, le studio te la montre image par image, et le moteur l'exporte en MP4 sur la
+            puce graphique de ton Mac.
+          </p>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <span class="stat-value">26 s</span>
+            <span class="stat-label">pour exporter logo-reel, contre 58 s au départ</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">−55 %</span>
+            <span class="stat-label">de temps d'export sur la même vidéo et le même Mac</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">7,6 s</span>
+            <span class="stat-label">pour rendre seulement 4 s d'une vidéo de 40 s</span>
+          </div>
+        </div>
+        <p class="footnote">
+          Mesures sur logo-reel : 40 s, 1080×1920, 13 vidéos, son, 3D et modes de fusion. MacBook
+          Pro M2 Max, 12 cœurs.
+        </p>
+
+        <h2>Comment ça marche</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-num">1</span>
+            <h3>Tu décris</h3>
+            <p>
+              L'agent écrit la vidéo comme une page web : HTML pour le contenu, CSS pour le style,
+              GSAP pour le mouvement.
+            </p>
+          </li>
+          <li>
+            <span class="step-num">2</span>
+            <h3>Tu ajustes</h3>
+            <p>
+              Le studio affiche la timeline, les calques et les images clés. Chaque modification
+              se voit tout de suite.
+            </p>
+          </li>
+          <li>
+            <span class="step-num">3</span>
+            <h3>Tu exportes</h3>
+            <p>
+              Le moteur ouvre Chrome sans fenêtre, capture chaque image et l'encode pendant la
+              capture, sur la puce graphique.
+            </p>
+          </li>
+        </ol>
+
+        <h2>Ce qui change par rapport à la base</h2>
+        <ul class="changes">
+          <li>
+            <h3>Encodage sur la puce graphique, par défaut</h3>
+            <p>VideoToolbox d'Apple encode la vidéo. Qualité contrôlée : 45 dB de PSNR en moyenne, aucune perte visible.</p>
+          </li>
+          <li>
+            <h3>Capture et encodage en même temps</h3>
+            <p>Les images partent à l'encodeur dès qu'elles sont capturées, au lieu d'attendre la fin.</p>
+          </li>
+          <li>
+            <h3>Processus de capture réglés pour Mac</h3>
+            <p>Chrome dessine sur la puce graphique : le moteur lance donc plus de captures en parallèle.</p>
+          </li>
+          <li>
+            <h3>Rendu d'un passage</h3>
+            <p>Options <code>--from</code> et <code>--to</code> : seulement le morceau voulu, son compris, aligné à l'image près.</p>
+          </li>
+        </ul>
+
+        <h2>Comparaison</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th class="is-ours">Glintmotion</th>
+                <th>HyperFrames</th>
+                <th>Remotion</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>Écriture des scènes</th>
+                <td class="is-ours">HTML, CSS, GSAP</td>
+                <td>HTML, CSS, GSAP</td>
+                <td>React</td>
+              </tr>
+              <tr>
+                <th>Export de logo-reel</th>
+                <td class="is-ours">26 s</td>
+                <td>58 s</td>
+                <td>Non mesuré : la vidéo serait à réécrire en React</td>
+              </tr>
+              <tr>
+                <th>Encodage sur la puce graphique</th>
+                <td class="is-ours">Par défaut</td>
+                <td>Option <code>--gpu</code></td>
+                <td>Option, désactivée par défaut</td>
+              </tr>
+              <tr>
+                <th>Réglages pour Mac</th>
+                <td class="is-ours">Oui</td>
+                <td>Non</td>
+                <td>Non</td>
+              </tr>
+              <tr>
+                <th>Rendu d'un passage</th>
+                <td class="is-ours"><code>--from</code> / <code>--to</code></td>
+                <td>Non</td>
+                <td><code>--frames</code></td>
+              </tr>
+              <tr>
+                <th>Capture d'une image</th>
+                <td class="is-ours">Chrome standard, ~20 ms en moyenne</td>
+                <td>Chrome standard</td>
+                <td>Chrome modifié, plus de 250 ms sur nos scènes de test</td>
+              </tr>
+              <tr>
+                <th>Studio avec timeline</th>
+                <td class="is-ours">Oui, dans l'app</td>
+                <td>Oui</td>
+                <td>Oui, dans le navigateur</td>
+              </tr>
+              <tr>
+                <th>App Mac</th>
+                <td class="is-ours">Oui</td>
+                <td>Oui</td>
+                <td>Non</td>
+              </tr>
+              <tr>
+                <th>Licence</th>
+                <td class="is-ours">Usage privé</td>
+                <td>Apache 2.0</td>
+                <td>Gratuite jusqu'à 3 salariés, payante au-delà</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footnote">
+          Remotion et Glintmotion n'ont pas été mesurés sur la même vidéo : les temps de capture
+          donnent un ordre de grandeur, pas un classement.
+        </p>
+
+        <h2>Testé et écarté</h2>
+        <ul class="rejected">
+          <li>
+            <strong>Capture par mémoire partagée, comme Remotion.</strong> Remotion y gagne 35 %
+            parce que sa capture classique est lente. Dans notre moteur, l'essai équivalent ne
+            gagne rien : 28,6 s contre 26,9 s.
+          </li>
+          <li>
+            <strong>Images plus compressées pendant la capture.</strong> 2 s de gagnées, mais une
+            perte de qualité mesurable.
+          </li>
+          <li>
+            <strong>Capture rapide <code>drawElementImage</code>.</strong> Plus lente dès que
+            l'encodage se fait pendant la capture : 23,8 s contre 16,7 s sur une vidéo de test.
+          </li>
+          <li>
+            <strong>Un sixième processus de capture.</strong> 1 s de gagnée, au prix d'un risque de
+            manquer de mémoire.
+          </li>
+        </ul>
+
+        <h2>Et ensuite</h2>
+        <p class="prose">
+          Avec Chrome, l'export est au plancher : c'est Chrome lui-même qui dessine chaque image.
+          La prochaine marche, c'est un moteur natif en Rust, qui dessinera sans navigateur.
+        </p>
+
+        <p class="credits">
+          Glintmotion est construit sur HyperFrames (HeyGen, licence Apache 2.0) et utilise GSAP.
+          Usage privé, à ne pas diffuser.
+        </p>
+      </section>
+    </main>
+
+    <dialog id="new-dialog">
+      <form id="new-form" method="dialog">
+        <h2>Nouveau projet</h2>
+        <label class="field">
+          <span>Nom</span>
+          <input name="name" required autocomplete="off" placeholder="Lancement printemps" />
+        </label>
+        <fieldset class="field">
+          <legend>Format</legend>
+          <div class="formats">
+            <label><input type="radio" name="resolution" value="portrait" checked /><span class="fmt fmt-portrait"></span>Vertical<small>1080×1920</small></label>
+            <label><input type="radio" name="resolution" value="landscape" /><span class="fmt fmt-landscape"></span>Horizontal<small>1920×1080</small></label>
+            <label><input type="radio" name="resolution" value="square" /><span class="fmt fmt-square"></span>Carré<small>1080×1080</small></label>
+          </div>
+        </fieldset>
+        <div class="field">
+          <span>Emplacement</span>
+          <div class="location">
+            <code id="new-parent"></code>
+            <button type="button" class="btn btn-secondary btn-small" id="change-parent">Changer…</button>
+          </div>
+        </div>
+        <p class="form-error" id="new-error" hidden></p>
+        <div class="actions">
+          <button type="button" class="btn btn-secondary" id="cancel-new">Annuler</button>
+          <button type="submit" class="btn btn-primary" id="confirm-new">Créer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="busy" id="busy" hidden>
+      <div class="spinner"></div>
+      <p id="busy-text">Ouverture du studio…</p>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+
+    <template id="card-template">
+      <article class="card">
+        <button class="card-open">
+          <div class="thumb"><div class="frame"><img src="mark.svg" alt="" /></div></div>
+          <div class="card-body">
+            <h3 class="card-title"></h3>
+            <p class="card-meta"></p>
+            <p class="card-time"></p>
+          </div>
+        </button>
+        <div class="card-tools">
+          <button class="tool" data-tool="reveal">Finder</button>
+          <button class="tool" data-tool="forget">Retirer</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

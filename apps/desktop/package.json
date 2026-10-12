@@ -1,0 +1,19 @@
+{
+  "name": "glintmotion-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Glintmotion, motion design in HTML with a fast local export engine.",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.7.0",
+    "sharp": "^0.35.5"
+  },
+  "productName": "Glintmotion"
+}

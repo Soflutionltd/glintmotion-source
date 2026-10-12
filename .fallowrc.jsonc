@@ -70,6 +70,8 @@
   ],
   "ignorePatterns": [
     "docs/**",
+    // Electron app with its own npm install, outside the bun workspaces.
+    "apps/desktop/**",
     // Chrome browser binaries downloaded by puppeteer — not project source.
     "chrome/**",
     // Standalone spike scripts and benchmark runners used during R&D.

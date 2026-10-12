@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -98,6 +98,7 @@ function runEngine(args, cwd) {
 }
 
 function stopStudio() {
+  agentRun?.child.kill("SIGTERM");
   if (!studio) return;
   studio.child.kill("SIGTERM");
   studio = null;
@@ -136,10 +137,10 @@ async function openStudio(dir) {
   await win.loadURL(url);
 }
 
-async function goHome() {
+async function goHome(action) {
   stopStudio();
   win.setTitle(APP_NAME);
-  await win.loadFile(join(here, "ui", "index.html"));
+  await win.loadFile(join(here, "ui", "index.html"), action === "new" ? { hash: "new" } : {});
 }
 
 function createProject({ name, parent, resolution }) {
@@ -189,7 +190,134 @@ ipcMain.handle("projects:forget", (_event, dir) => {
   const list = readRecents().filter((r) => r.path !== dir);
   writeFileSync(recentsFile(), JSON.stringify(list, null, 2));
 });
-ipcMain.handle("app:home", () => goHome());
+ipcMain.handle("app:home", (_event, action) => goHome(action));
+ipcMain.handle("projects:current", () => (studio ? projectInfo(studio.dir, null) : null));
+
+const AGENT_MODELS = ["opus", "sonnet", "haiku"];
+const AGENT_SYSTEM_PROMPT = [
+  "You are working inside Glintmotion, a motion design studio where each video is an HTML composition.",
+  "The studio is open on this project and reloads the preview live whenever you save a file.",
+  "Edit the composition files in place. Answer in the language the user writes in, briefly.",
+].join(" ");
+
+/** @type {{ child: import("node:child_process").ChildProcess, dir: string } | null} */
+let agentRun = null;
+/** @type {Map<string, string>} project dir -> Claude Code session id */
+const agentSessions = new Map();
+
+function findClaude() {
+  const candidates = [
+    join(homedir(), ".local", "bin", "claude"),
+    join(homedir(), ".claude", "local", "claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+  const nvmRoot = join(homedir(), ".nvm", "versions", "node");
+  if (existsSync(nvmRoot)) {
+    for (const version of readdirSync(nvmRoot).sort().reverse()) {
+      candidates.push(join(nvmRoot, version, "bin", "claude"));
+    }
+  }
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error("Claude Code est introuvable sur ce Mac (commande claude).");
+  return found;
+}
+
+function sendAgentEvent(event) {
+  win?.webContents.send("agent:event", event);
+}
+
+function forwardAgentLine(line, dir) {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (message.session_id) agentSessions.set(dir, message.session_id);
+  if (message.type === "assistant") {
+    for (const block of message.message?.content ?? []) {
+      if (block.type === "text" && block.text.trim()) sendAgentEvent({ kind: "text", text: block.text });
+      if (block.type === "tool_use") {
+        const input = block.input ?? {};
+        const target = input.file_path ?? input.path ?? input.pattern ?? input.command ?? "";
+        sendAgentEvent({ kind: "tool", name: block.name, target: String(target).replace(`${dir}/`, "") });
+      }
+    }
+  } else if (message.type === "result") {
+    sendAgentEvent({
+      kind: "done",
+      error: message.is_error ? String(message.result ?? "Erreur de l'agent") : null,
+      costUsd: message.total_cost_usd ?? null,
+      durationMs: message.duration_ms ?? null,
+    });
+  }
+}
+
+function startAgent({ prompt, model }) {
+  if (!studio) throw new Error("Aucun projet ouvert.");
+  if (agentRun) throw new Error("L'agent travaille déjà sur une demande.");
+  const text = String(prompt ?? "").trim();
+  if (!text) throw new Error("Demande vide.");
+  if (!AGENT_MODELS.includes(model)) throw new Error(`Modèle inconnu : ${model}`);
+
+  const claude = findClaude();
+  const dir = studio.dir;
+  const args = [
+    "-p",
+    text,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    model,
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Bash(npm run check)",
+    "--append-system-prompt",
+    AGENT_SYSTEM_PROMPT,
+  ];
+  const session = agentSessions.get(dir);
+  if (session) args.push("--resume", session);
+
+  const child = spawn(claude, args, {
+    cwd: dir,
+    env: { ...process.env, PATH: [dirname(claude), engineEnv.PATH].join(":") },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  agentRun = { child, dir };
+  let buffer = "";
+  let stderr = "";
+  let finished = false;
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.includes('"type":"result"')) finished = true;
+      forwardAgentLine(line, dir);
+    }
+  });
+  child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
+  child.on("exit", (code, signal) => {
+    if (buffer) forwardAgentLine(buffer, dir);
+    agentRun = null;
+    if (finished) return;
+    const error =
+      signal === "SIGTERM" ? null : `Claude Code s'est arrêté (code ${code}). ${stderr.slice(-400)}`.trim();
+    sendAgentEvent({ kind: "done", error, stopped: signal === "SIGTERM", costUsd: null, durationMs: null });
+  });
+}
+
+ipcMain.handle("agent:models", () => AGENT_MODELS);
+ipcMain.handle("agent:send", (_event, request) => startAgent(request ?? {}));
+ipcMain.handle("agent:stop", () => {
+  agentRun?.child.kill("SIGTERM");
+});
+ipcMain.handle("agent:reset", () => {
+  if (studio) agentSessions.delete(studio.dir);
+});
 
 function buildMenu() {
   const template = [

@@ -24,7 +24,7 @@ import { DOCK_PANEL_COMPONENT, parseDockLayout } from "./dockLayoutSchema";
 import { useDockLayoutStore, type DockController, type DockSnapshot } from "./dockLayoutStore";
 import {
   PANEL_DEFINITIONS,
-  PANEL_IDS,
+  BASE_PANEL_IDS,
   isPanelId,
   panelsInZone,
   type PanelDefinition,
@@ -147,7 +147,7 @@ const windowWidth = () => window.innerWidth;
 
 function Root({
   projectId,
-  panels = PANEL_IDS,
+  panels = BASE_PANEL_IDS,
   storageKey,
   dockWidth = windowWidth,
   children,

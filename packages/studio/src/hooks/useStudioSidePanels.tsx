@@ -1,6 +1,7 @@
 import { useMemo, type ComponentProps } from "react";
 import { StudioLeftPanels } from "../components/StudioLeftPanels";
 import { StudioRightPanels } from "../components/StudioRightPanels";
+import { StudioHostPanels } from "../components/desktop/StudioHostPanels";
 import { useStableHandlers } from "./useStableHandlers";
 
 /** Both side panels as one element that changes only when a panel's data does, never for a new handler. */
@@ -16,6 +17,7 @@ export function useStudioSidePanels(
       <>
         <StudioLeftPanels {...stableLeft} />
         <StudioRightPanels {...stableRight} />
+        <StudioHostPanels />
       </>
     ),
     [stableLeft, stableRight],

@@ -1,6 +1,6 @@
 import type { Direction } from "dockview-react";
 
-export const PANEL_IDS = [
+export const BASE_PANEL_IDS = [
   "preview",
   "timeline",
   "compositions",
@@ -13,6 +13,11 @@ export const PANEL_IDS = [
   "variables",
   "slideshow",
 ] as const;
+
+/** Panels that need the Glintmotion desktop host (its project list and agent bridge). */
+const HOST_PANEL_IDS = ["projects", "agent", "files"] as const;
+
+export const PANEL_IDS = [...BASE_PANEL_IDS, ...HOST_PANEL_IDS] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
 export type PanelZone = "left" | "center" | "right";
@@ -56,6 +61,9 @@ export const PANEL_DEFINITIONS = {
   renders: { title: "Renders", zone: "right", reopen: { near: "design", direction: "within" } },
   variables: { title: "Variables", zone: "right", reopen: { near: "design", direction: "within" } },
   slideshow: { title: "Slideshow", zone: "right", reopen: { near: "design", direction: "within" } },
+  projects: { title: "Projects", zone: "left", reopen: { near: "preview", direction: "left" } },
+  agent: { title: "Agent", zone: "left", reopen: { near: "compositions", direction: "within" } },
+  files: { title: "Files", zone: "right", reopen: { near: "design", direction: "within" } },
 } as const satisfies Record<PanelId, PanelDefinition>;
 
 export function isPanelId(value: unknown): value is PanelId {

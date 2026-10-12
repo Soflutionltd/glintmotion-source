@@ -1,5 +1,5 @@
 import type { SerializedDockview } from "dockview-react";
-import { PANEL_IDS, isPanelId, type PanelId } from "./panelRegistry";
+import { BASE_PANEL_IDS, isPanelId, type PanelId } from "./panelRegistry";
 
 export const DOCK_PANEL_COMPONENT = "panel";
 
@@ -58,7 +58,7 @@ function collectFloatingViews(floating: unknown, into: unknown[]): boolean {
 /** Parses a stored layout at the trust boundary; null (stale or foreign shape) means use the default preset. */
 export function parseDockLayout(
   value: unknown,
-  allowed: readonly PanelId[] = PANEL_IDS,
+  allowed: readonly PanelId[] = BASE_PANEL_IDS,
 ): SerializedDockview | null {
   if (!isRecord(value) || !isRecord(value.grid) || !isRecord(value.panels)) return null;
   const { grid, panels } = value;

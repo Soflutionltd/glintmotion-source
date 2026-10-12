@@ -20,6 +20,11 @@ import { StudioAgentTools } from "../webmcp/StudioAgentTools";
 import type { TimelineDropPlacement } from "../player/components/timelineCallbacks";
 import type { TimelineProps } from "../player/components/TimelineTypes";
 import { Dock } from "./dock/Dock";
+import { PANEL_IDS } from "./dock/panelRegistry";
+import { getDesktopHost } from "../utils/desktopHost";
+
+const desktopHost = getDesktopHost();
+const DESKTOP_DOCK_STORAGE_KEY = "glintmotion.dockLayout.v1";
 
 type RenderClipContent = (
   element: TimelineElement,
@@ -310,7 +315,10 @@ function EditorShellBody({
       {/* Renders nothing; exposes Studio's state to an agentic browser. Mounted
           here rather than in App because it needs the DomEdit contexts. */}
       <StudioAgentTools />
-      <Dock.Root projectId={projectId}>
+      <Dock.Root
+        projectId={projectId}
+        {...(desktopHost ? { panels: PANEL_IDS, storageKey: DESKTOP_DOCK_STORAGE_KEY } : {})}
+      >
         <Dock.Panel id="preview">
           <div className="relative flex h-full w-full min-w-0 flex-col">
             <PreviewPane

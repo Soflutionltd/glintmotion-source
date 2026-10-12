@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   PANEL_DEFINITIONS,
-  PANEL_IDS,
+  BASE_PANEL_IDS,
   panelsInZone,
   type PanelId,
   type PanelZone,
@@ -50,13 +50,13 @@ interface DockLayoutState extends DockSnapshot {
 
 export const useDockLayoutStore = create<DockLayoutState>((set, get) => ({
   controller: null,
-  panels: PANEL_IDS,
-  openPanels: new Set(PANEL_IDS),
-  visiblePanels: new Set(PANEL_IDS),
+  panels: BASE_PANEL_IDS,
+  openPanels: new Set(BASE_PANEL_IDS),
+  visiblePanels: new Set(BASE_PANEL_IDS),
   activePanel: null,
   lastActive: {},
   pendingActivation: null,
-  attach: (controller, panels = PANEL_IDS) => set({ controller, panels }),
+  attach: (controller, panels = BASE_PANEL_IDS) => set({ controller, panels }),
   detach: () => set({ controller: null, lastActive: {} }),
   sync: (snapshot) =>
     set((state) => {

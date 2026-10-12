@@ -4,10 +4,13 @@ import {
   ChartBarHorizontal,
   Code,
   FilmSlate,
+  FolderSimple,
   Image,
   Layout,
   Monitor,
   Presentation,
+  Rows,
+  Sparkle,
   SlidersHorizontal,
   SquaresFour,
   Stack,
@@ -29,6 +32,9 @@ const TAB_ICONS: Record<PanelId, Icon> = {
   renders: FilmSlate,
   variables: BracketsCurly,
   slideshow: Presentation,
+  projects: Rows,
+  agent: Sparkle,
+  files: FolderSimple,
 };
 
 /**

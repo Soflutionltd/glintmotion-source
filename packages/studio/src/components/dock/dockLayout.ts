@@ -1,6 +1,6 @@
 import type { Direction, DockviewApi } from "dockview-react";
 import { DOCK_PANEL_COMPONENT } from "./dockLayoutSchema";
-import { PANEL_DEFINITIONS, PANEL_IDS, isPanelId, type PanelId } from "./panelRegistry";
+import { BASE_PANEL_IDS, PANEL_DEFINITIONS, isPanelId, type PanelId } from "./panelRegistry";
 
 const MIN_PREVIEW_W = 360;
 const MIN_PREVIEW_H = 200;
@@ -8,8 +8,9 @@ const MIN_TIMELINE_H = 100;
 const MIN_SIDE_W = 200;
 const MIN_SIDE_W_FLOOR = 120;
 const DEFAULT_TIMELINE_H = 360;
-const DEFAULT_LEFT = ["compositions", "assets", "code", "catalog"] as const;
-const DEFAULT_RIGHT = ["design", "layers", "renders", "variables"] as const;
+const DEFAULT_LEFT = ["agent", "compositions", "assets", "code", "catalog"] as const;
+const DEFAULT_RIGHT = ["files", "design", "layers", "renders", "variables"] as const;
+const PROJECTS_W = 220;
 
 /** Preferred side widths; when they overflow the preview's floor the right yields first, then the left. */
 export function defaultSideWidths(viewportWidth: number) {
@@ -103,16 +104,30 @@ function addSideColumn(
 export function buildEditLayout(
   api: DockviewApi,
   viewportWidth: number,
-  panels: readonly PanelId[] = PANEL_IDS,
+  panels: readonly PanelId[] = BASE_PANEL_IDS,
 ) {
   api.clear();
-  const widths = defaultSideWidths(viewportWidth);
+  const widths = defaultSideWidths(
+    panels.includes("projects") ? viewportWidth - PROJECTS_W : viewportWidth,
+  );
   addRegisteredPanel(api, "preview");
   addRegisteredPanel(api, "timeline", { referencePanel: "preview", direction: "below" });
   const left = addSideColumn(api, DEFAULT_LEFT, panels, "left");
   const right = addSideColumn(api, DEFAULT_RIGHT, panels, "right");
+  if (panels.includes("projects")) {
+    // No reference panel: the column spans the full dock height, beside the timeline too.
+    api.addPanel({
+      id: "projects",
+      component: DOCK_PANEL_COMPONENT,
+      title: PANEL_DEFINITIONS.projects.title,
+      renderer: "always",
+      minimumWidth: MIN_SIDE_W_FLOOR,
+      position: { direction: "left" },
+    });
+  }
   applySideMinimums(api, viewportWidth);
   if (left) api.getPanel(left)?.group.api.setSize({ width: widths.left });
   if (right) api.getPanel(right)?.group.api.setSize({ width: widths.right });
   api.getPanel("timeline")?.group.api.setSize({ height: DEFAULT_TIMELINE_H });
+  api.getPanel("projects")?.group.api.setSize({ width: PROJECTS_W });
 }

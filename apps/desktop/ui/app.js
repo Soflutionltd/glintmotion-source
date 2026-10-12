@@ -209,3 +209,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 loadProjects();
+if (location.hash === "#new") {
+  history.replaceState(null, "", location.pathname);
+  startNewProject();
+}

@@ -19,11 +19,25 @@ export type AgentEvent =
       durationMs: number | null;
     };
 
+export interface ClaudeStatus {
+  installed: boolean;
+  loggedIn: boolean;
+  email: string | null;
+  busy: boolean;
+}
+
+export type ClaudeAccountAction = "install" | "login" | "logout" | "switch";
+
 export interface DesktopHost {
   listProjects: () => Promise<DesktopProject[]>;
   currentProject: () => Promise<DesktopProject | null>;
   openProject: (dir: string) => Promise<void>;
   home: (action?: "new") => Promise<void>;
+  claude: {
+    status: () => Promise<ClaudeStatus>;
+    account: (action: ClaudeAccountAction) => Promise<ClaudeStatus>;
+    cancel: () => Promise<void>;
+  };
   agent: {
     models: () => Promise<string[]>;
     send: (request: { prompt: string; model: string }) => Promise<void>;

@@ -211,7 +211,7 @@ let agentRun = null;
 /** @type {Map<string, string>} project dir -> Claude Code session id */
 const agentSessions = new Map();
 
-function findClaude() {
+function locateClaude() {
   const candidates = [
     join(homedir(), ".local", "bin", "claude"),
     join(homedir(), ".claude", "local", "claude"),
@@ -224,9 +224,132 @@ function findClaude() {
       candidates.push(join(nvmRoot, version, "bin", "claude"));
     }
   }
-  const found = candidates.find((candidate) => existsSync(candidate));
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function findClaude() {
+  const found = locateClaude();
   if (!found) throw new Error("Claude Code est introuvable sur ce Mac (commande claude).");
   return found;
+}
+
+const CLAUDE_INSTALL_URL = "https://claude.ai/install.sh";
+const ACCOUNT_TIMEOUT_MS = 5 * 60_000;
+/** @type {{ child: import("node:child_process").ChildProcess, cancelled: boolean } | null} */
+let accountRun = null;
+
+class AccountCancelled extends Error {}
+
+/** Its output is never surfaced: a sign-in prints OAuth URLs carrying the session's state. */
+function runClaudeCommand(bin, args, timeoutMs, failure) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      cwd: homedir(),
+      env: { ...process.env, PATH: [dirname(bin), engineEnv.PATH].join(":") },
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    const run = { child, cancelled: false };
+    accountRun = run;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      accountRun = null;
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      accountRun = null;
+      if (code === 0) resolve();
+      else if (run.cancelled) reject(new AccountCancelled());
+      else if (timedOut) reject(new Error(`${failure} Délai dépassé.`));
+      else reject(new Error(`${failure} (code ${code})`));
+    });
+  });
+}
+
+async function claudeStatus() {
+  const claude = locateClaude();
+  if (!claude) return { installed: false, loggedIn: false, email: null, busy: Boolean(accountRun) };
+  const output = await new Promise((resolve) => {
+    const child = spawn(claude, ["auth", "status"], {
+      env: { ...process.env, PATH: [dirname(claude), engineEnv.PATH].join(":") },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let text = "";
+    child.stdout.on("data", (chunk) => (text += chunk));
+    child.on("error", () => resolve(""));
+    child.on("exit", () => resolve(text));
+  });
+  let status = {};
+  try {
+    status = JSON.parse(String(output));
+  } catch {
+    status = {};
+  }
+  return {
+    installed: true,
+    loggedIn: status.loggedIn === true,
+    email: typeof status.email === "string" ? status.email : null,
+    busy: Boolean(accountRun),
+  };
+}
+
+async function installClaude() {
+  const { response } = await dialog.showMessageBox(win ?? undefined, {
+    type: "question",
+    buttons: ["Installer", "Annuler"],
+    defaultId: 0,
+    cancelId: 1,
+    message: "Installer Claude Code ?",
+    detail: `Glintmotion lance l'installateur officiel d'Anthropic (${CLAUDE_INSTALL_URL}). Claude Code s'installe dans ton dossier personnel.`,
+  });
+  if (response !== 0) return;
+  await runClaudeCommand(
+    "/bin/bash",
+    ["-c", `set -o pipefail; curl -q --proto =https --proto-redir =https -fsSL ${CLAUDE_INSTALL_URL} | bash`],
+    ACCOUNT_TIMEOUT_MS,
+    "L'installation de Claude Code a échoué.",
+  );
+}
+
+const login = () =>
+  runClaudeCommand(findClaude(), ["auth", "login"], ACCOUNT_TIMEOUT_MS, "La connexion à Claude n'a pas abouti.");
+const logout = () =>
+  runClaudeCommand(findClaude(), ["auth", "logout"], 30_000, "La déconnexion de Claude a échoué.");
+
+async function confirmLogout() {
+  const { response } = await dialog.showMessageBox(win ?? undefined, {
+    type: "warning",
+    buttons: ["Se déconnecter", "Annuler"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Se déconnecter de Claude ?",
+    detail: "Claude Code est déconnecté sur tout le Mac, y compris dans le terminal et les autres apps qui l'utilisent.",
+  });
+  return response === 0;
+}
+
+async function runClaudeAccount(action) {
+  if (accountRun) throw new Error("Une opération de compte est déjà en cours.");
+  if (agentRun) throw new Error("Attends la fin de la demande en cours.");
+  if (action === "logout" && !(await confirmLogout())) return claudeStatus();
+  try {
+    if (action === "install") await installClaude();
+    else if (action === "login") await login();
+    else if (action === "logout") await logout();
+    else if (action === "switch") {
+      await logout();
+      await login();
+    } else throw new Error(`Action inconnue : ${action}`);
+  } catch (error) {
+    if (!(error instanceof AccountCancelled)) throw error;
+  }
+  agentSessions.clear();
+  return claudeStatus();
 }
 
 function sendAgentEvent(event) {
@@ -387,6 +510,13 @@ ipcMain.handle("agent:stop", () => {
 ipcMain.handle("agent:reset", () => {
   if (studio) agentSessions.delete(studio.dir);
 });
+ipcMain.handle("claude:status", () => claudeStatus());
+ipcMain.handle("claude:account", (_event, action) => runClaudeAccount(action));
+ipcMain.handle("claude:cancel", () => {
+  if (!accountRun) return;
+  accountRun.cancelled = true;
+  accountRun.child.kill("SIGTERM");
+});
 
 function buildMenu() {
   const template = [
@@ -464,4 +594,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => stopStudio());
+app.on("before-quit", () => {
+  stopStudio();
+  accountRun?.child.kill("SIGTERM");
+});

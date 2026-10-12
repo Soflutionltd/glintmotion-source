@@ -1,6 +1,12 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ArrowUp, NotePencil, Sparkle, Square, Wrench } from "@phosphor-icons/react";
-import type { AgentEvent, DesktopHost } from "../../utils/desktopHost";
+import { ArrowUp, DownloadSimple, NotePencil, SignIn, Square, Wrench } from "@phosphor-icons/react";
+import type {
+  AgentEvent,
+  ClaudeAccountAction,
+  ClaudeStatus,
+  DesktopHost,
+} from "../../utils/desktopHost";
+import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
 
 type ChatItem =
   | { id: number; role: "user"; text: string }
@@ -30,6 +36,8 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   const [busy, setBusy] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("opus");
+  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [pending, setPending] = useState<ClaudeAccountAction | null>(null);
   const nextId = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -57,12 +65,45 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   }, [host]);
 
   useEffect(() => {
+    const refresh = () => {
+      host.claude
+        .status()
+        .then(setClaude)
+        .catch(() => setClaude(null));
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [host]);
+
+  const runAccount = (action: ClaudeAccountAction) => {
+    if (pending || busy) return;
+    setPending(action);
+    host.claude
+      .account(action)
+      .then(setClaude)
+      .catch((reason: unknown) =>
+        push({
+          role: "status",
+          text: (reason instanceof Error ? reason.message : String(reason)).replace(
+            /^Error invoking remote method '[^']+': (Error: )?/,
+            "",
+          ),
+          error: true,
+        }),
+      )
+      .finally(() => setPending(null));
+  };
+
+  const ready = Boolean(claude?.installed && claude.loggedIn) && !pending;
+
+  useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [items]);
 
   const send = () => {
     const prompt = draft.trim();
-    if (!prompt || busy) return;
+    if (!prompt || busy || !ready) return;
     push({ role: "user", text: prompt });
     setDraft("");
     setBusy(true);
@@ -85,10 +126,13 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 pt-2.5 pb-2">
-        <span className="flex items-center gap-1.5 text-[12px] font-medium text-panel-text-1">
-          <Sparkle size={14} weight="fill" className="text-studio-accent" aria-hidden="true" />
-          Claude Code
-        </span>
+        <ClaudeAccountMenu
+          status={claude}
+          pending={pending}
+          disabled={busy}
+          onAction={runAccount}
+          onCancel={() => void host.claude.cancel()}
+        />
         <select
           value={model}
           onChange={(event) => setModel(event.target.value)}
@@ -115,7 +159,32 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-2">
-        {items.length === 0 && (
+        {items.length === 0 && claude && !ready && (
+          <div className="flex flex-col items-center gap-3 px-1 pt-6 text-center">
+            <p className="text-[11px] leading-relaxed text-neutral-500">
+              {pending
+                ? "Finish in your browser, then come back here."
+                : claude.installed
+                  ? "Sign in with your Claude account to let the agent edit this project."
+                  : "The agent runs on Claude Code. Install it to edit this project by chat."}
+            </p>
+            {!pending && (
+              <button
+                type="button"
+                onClick={() => runAccount(claude.installed ? "login" : "install")}
+                className="flex items-center gap-1.5 rounded-full bg-panel-text-1 px-4 py-1.5 text-[12px] font-medium text-panel-bg transition-transform hover:scale-105"
+              >
+                {claude.installed ? (
+                  <SignIn size={13} aria-hidden="true" />
+                ) : (
+                  <DownloadSimple size={13} aria-hidden="true" />
+                )}
+                {claude.installed ? "Sign in to Claude" : "Install Claude Code"}
+              </button>
+            )}
+          </div>
+        )}
+        {items.length === 0 && ready && (
           <p className="px-1 pt-6 text-center text-[11px] leading-relaxed text-neutral-500">
             Describe the change you want. The agent edits this project and the preview reloads by
             itself.
@@ -200,7 +269,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
           ) : (
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || !ready}
               aria-label="Send"
               className="flex h-7 w-7 items-center justify-center rounded-full bg-panel-text-1 text-panel-bg transition-transform hover:scale-105 disabled:opacity-30"
             >

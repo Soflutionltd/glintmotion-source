@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld("glintmotion", {
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),
     open: () => ipcRenderer.invoke("mcp:open"),
   },
+  claude: {
+    status: () => ipcRenderer.invoke("claude:status"),
+    account: (action) => ipcRenderer.invoke("claude:account", action),
+    cancel: () => ipcRenderer.invoke("claude:cancel"),
+  },
   agent: {
     models: () => ipcRenderer.invoke("agent:models"),
     send: (request) => ipcRenderer.invoke("agent:send", request),

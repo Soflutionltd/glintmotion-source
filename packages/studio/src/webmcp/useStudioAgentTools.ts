@@ -3,6 +3,7 @@ import { trackEvent } from "../telemetry/client";
 import { readStudioUiPreferences } from "../utils/studioUiPreferences";
 import { makeStudioDebugLogger } from "../utils/studioDebug";
 import { loadModelContextPolyfill } from "./polyfill";
+import { exposeToolsToDesktopHost } from "./desktopToolBridge";
 import { registerStudioTools, type ToolRegistrationReport } from "./registrar";
 import { runToolBody, type ToolResult } from "./toolResult";
 import { getModelContext, type ModelContext, type ModelContextTool } from "./types";
@@ -322,6 +323,7 @@ export function useStudioAgentTools(deps: StudioAgentToolsDeps): void {
     }
 
     const controller = new AbortController();
+    exposeToolsToDesktopHost(buildStudioTools(depsRef), controller.signal);
 
     void (async () => {
       const native: ModelContext | null = getModelContext();

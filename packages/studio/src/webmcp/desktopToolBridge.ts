@@ -13,11 +13,17 @@ declare global {
   }
 }
 
-/** Publishes Studio's agent tools to the desktop host; a no-op in a plain browser. */
-export function exposeToolsToDesktopHost(tools: ModelContextTool[], signal: AbortSignal): void {
-  if (!getDesktopHost()) return;
+/** Each mounted tool set, by source, so the timeline tools and the scene tools come and go independently. */
+const sources = new Map<string, ModelContextTool[]>();
+
+function publish(): void {
+  const tools = [...sources.values()].flat();
+  if (tools.length === 0) {
+    delete window.__glintmotionStudioTools;
+    return;
+  }
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  const bridge: DesktopToolBridge = {
+  window.__glintmotionStudioTools = {
     list: () =>
       tools.map(({ name, title, description, inputSchema }) => ({
         name,
@@ -31,8 +37,20 @@ export function exposeToolsToDesktopHost(tools: ModelContextTool[], signal: Abor
       return tool.execute(input, { signal: new AbortController().signal });
     },
   };
-  window.__glintmotionStudioTools = bridge;
+}
+
+/** Publishes Studio's agent tools to the desktop host; a no-op in a plain browser. */
+export function exposeToolsToDesktopHost(
+  tools: ModelContextTool[],
+  signal: AbortSignal,
+  source = "studio",
+): void {
+  if (!getDesktopHost()) return;
+  sources.set(source, tools);
+  publish();
   signal.addEventListener("abort", () => {
-    if (window.__glintmotionStudioTools === bridge) delete window.__glintmotionStudioTools;
+    if (sources.get(source) !== tools) return;
+    sources.delete(source);
+    publish();
   });
 }

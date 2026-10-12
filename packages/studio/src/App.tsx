@@ -51,6 +51,7 @@ import { useGestureCommit } from "./hooks/useGestureCommit";
 import { useGestureTrailOverlay } from "./hooks/useGestureTrailOverlay";
 import { EditorShell } from "./components/EditorShell";
 import { useStudioSidePanels } from "./hooks/useStudioSidePanels";
+import { desktopHostHandlers } from "./components/desktop/DesktopTimelineTools";
 import { TimelineToolbar } from "./components/TimelineToolbar";
 import { StudioPlaybackProvider, StudioShellProvider } from "./contexts/StudioContext";
 import { PanelLayoutProvider } from "./contexts/PanelLayoutContext";
@@ -494,10 +495,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
       onAddMediaOverlay: handleAddMediaOverlay,
     },
     projectId,
-    {
-      onAddAudioAtStart: (path: string) =>
-        timelineEditing.handleTimelineAssetDrop(path, { start: 0, track: 0 }),
-    },
+    desktopHostHandlers(timelineEditing),
   );
   if (resolving || waitingForServer || !projectId)
     return <StudioSplash waiting={waitingForServer} />;

@@ -31,6 +31,10 @@ function Panels({ project }: { project: string }) {
   >;
   return useStudioSidePanels({} as ComponentProps<typeof StudioLeftPanels>, right, project, {
     onAddAudioAtStart: () => undefined,
+    onAddAsset: async () => undefined,
+    onMoveClip: () => undefined,
+    onResizeClip: () => undefined,
+    onDeleteClip: async () => undefined,
   });
 }
 

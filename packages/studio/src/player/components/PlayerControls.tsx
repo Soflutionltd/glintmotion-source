@@ -10,6 +10,7 @@ import { ShortcutsButton } from "./ShortcutsPanel";
 import type { ShortcutSection } from "./studioShortcuts";
 import { SpeedMenu } from "./SpeedMenu";
 import { VolumeControl } from "./VolumeControl";
+import { PreviewScrubBar, currentPlayhead } from "./PreviewScrubBar";
 
 /* ── Icon sub-components ─────────────────────────────────────────── */
 
@@ -154,6 +155,50 @@ const FullscreenButton = memo(function FullscreenButton({
   );
 });
 
+const SkipButton = memo(function SkipButton({
+  seconds,
+  disabled,
+  onSeek,
+}: {
+  seconds: number;
+  disabled: boolean;
+  onSeek: (time: number) => void;
+}) {
+  const forward = seconds > 0;
+  const label = forward ? `Forward ${seconds} seconds` : `Back ${-seconds} seconds`;
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => {
+          const { duration } = usePlayerStore.getState();
+          trackStudioEvent("playback", { action: forward ? "skip_forward" : "skip_back" });
+          onSeek(Math.min(duration, Math.max(0, currentPlayhead() + seconds)));
+        }}
+        className="flex h-7 items-center gap-0.5 rounded-md px-1.5 font-mono text-[11px] tabular-nums text-neutral-400 transition-colors hover:text-neutral-100 disabled:pointer-events-none disabled:opacity-30"
+      >
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+          className={forward ? "order-2" : ""}
+        >
+          {forward ? (
+            <path d="M5 5v14l8-7zM13 5v14l8-7z" />
+          ) : (
+            <path d="M19 5v14l-8-7zM11 5v14l-8-7z" />
+          )}
+        </svg>
+        <span>{Math.abs(seconds)}</span>
+      </button>
+    </Tooltip>
+  );
+});
+
 /* ── Main component ──────────────────────────────────────────────── */
 
 interface PlayerControlsProps {
@@ -222,6 +267,7 @@ export const PlayerControls = memo(function PlayerControls({
 
   return (
     <div>
+      <PreviewScrubBar onSeek={onSeek} disabled={disabled} />
       <div
         className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
         aria-disabled={disabled || undefined}
@@ -248,20 +294,24 @@ export const PlayerControls = memo(function PlayerControls({
           </button>
         </Tooltip>
 
-        <Tooltip label={isPlaying ? "Pause" : "Play"}>
-          <button
-            type="button"
-            aria-label={isPlaying ? "Pause" : "Play"}
-            onClick={() => {
-              trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
-              onTogglePlay();
-            }}
-            disabled={controlsDisabled}
-            className="flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
-          >
-            <PlayPauseMorphIcon playing={isPlaying} />
-          </button>
-        </Tooltip>
+        <div className="flex items-center justify-self-center">
+          <SkipButton seconds={-5} disabled={controlsDisabled} onSeek={onSeek} />
+          <Tooltip label={isPlaying ? "Pause" : "Play"}>
+            <button
+              type="button"
+              aria-label={isPlaying ? "Pause" : "Play"}
+              onClick={() => {
+                trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
+                onTogglePlay();
+              }}
+              disabled={controlsDisabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
+            >
+              <PlayPauseMorphIcon playing={isPlaying} />
+            </button>
+          </Tooltip>
+          <SkipButton seconds={5} disabled={controlsDisabled} onSeek={onSeek} />
+        </div>
 
         <div className="flex min-w-0 items-center justify-self-end">
           <VolumeControl

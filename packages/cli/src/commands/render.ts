@@ -1,8 +1,16 @@
-import { failCommand, requestCliExit } from "../utils/commandResult.js";
+import { failCommand, failUsage, requestCliExit } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
-import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
+import {
+  createRenderPlan,
+  resolveBrowserGpuForCli,
+  type RenderCommandArgs,
+  type RenderFormat,
+} from "./render/plan.js";
+import { parseRenderRangeArgs, prepareRangeProject } from "./render/range.js";
+import { resolveProject } from "../utils/project.js";
+import { hasExplicitCompositionArg, resolveCompositionEntryArg } from "../utils/renderArgs.js";
 import { seedProjectAuthoringSkill } from "../utils/projectConfig.js";
 import type { CatalogUsage } from "../utils/catalogUsage.js";
 import { presentRenderPlan } from "./render/present.js";
@@ -13,6 +21,7 @@ export { resolveBrowserGpuForCli, renderLintContinuationHint, runRenderLint };
 export const examples: Example[] = [
   ["Render to MP4", "hyperframes render --output output.mp4"],
   ["Render a specific composition", "hyperframes render -c compositions/intro.html -o intro.mp4"],
+  ["Render only 0:12 to 0:18", "hyperframes render --from 12 --to 18 --output part.mp4"],
   [
     "Upsample any composition to 4K (supersamples via Chrome DPR)",
     "hyperframes render --resolution 4k --output 4k.mp4",
@@ -147,6 +156,15 @@ export default defineCommand({
       type: "string",
       alias: "o",
       description: "Output path (default: renders/<name>.mp4)",
+    },
+    from: {
+      type: "string",
+      description:
+        "Render only from this time, in seconds or m:ss (e.g. 12.5, 1:05). Audio is cut to the same range.",
+    },
+    to: {
+      type: "string",
+      description: "Render only up to this time, in seconds or m:ss. Default: end of composition.",
     },
     fps: {
       type: "string",
@@ -417,7 +435,10 @@ export default defineCommand({
   },
   // Keep the transport adapter thin: each phase has one ownership boundary.
   async run({ args }) {
-    const plan = createRenderPlan(args);
+    const rangeProject = prepareRangeFromArgs(args);
+    const plan = createRenderPlan(
+      rangeProject ? { ...args, dir: rangeProject.dir, composition: undefined } : args,
+    );
     const cancellation = plan.useDocker ? undefined : createRenderCancellationScope();
     try {
       // Teach the project its owning skill from an explicit --skill so every
@@ -443,9 +464,33 @@ export default defineCommand({
       throw error;
     } finally {
       cancellation?.dispose();
+      rangeProject?.cleanup();
     }
   },
 });
+
+function prepareRangeFromArgs(args: RenderCommandArgs & { from?: string; to?: string }) {
+  const parsed = parseRenderRangeArgs(args.from, args.to);
+  if (!parsed.ok) {
+    errorBox("Invalid range", parsed.message);
+    failUsage();
+  }
+  if (!parsed.value) return undefined;
+  if (args.batch) {
+    errorBox("Conflicting range flags", "--from/--to cannot be combined with --batch.");
+    failUsage();
+  }
+  const project = resolveProject(args.dir, {
+    requireIndex: !hasExplicitCompositionArg(args.composition),
+  });
+  const entryFile = resolveCompositionEntryArg(args.composition, project.dir, statSync);
+  try {
+    return prepareRangeProject(project.dir, entryFile, parsed.value);
+  } catch (error) {
+    errorBox("Invalid range", error instanceof Error ? error.message : String(error));
+    failUsage();
+  }
+}
 
 export interface SingleRenderResult {
   durationMs?: number;
@@ -602,7 +647,11 @@ async function readCompositionDimensions(
 export async function checkRenderResolutionPreflight(
   compositionHtml: string,
   outputResolution: CanvasResolution | undefined,
-  modes: { alphaRequested: boolean; hdrRequested: boolean; aspectAgnostic?: boolean },
+  modes: {
+    alphaRequested: boolean;
+    hdrRequested: boolean;
+    aspectAgnostic?: boolean;
+  },
 ): Promise<{ message: string; kind: OutputResolutionIssueKind } | undefined> {
   if (!outputResolution) return undefined;
   const dims = await readCompositionDimensions(compositionHtml);
@@ -649,7 +698,10 @@ function resolveDockerfilePath(): string {
 
 function dockerImageExists(tag: string): boolean {
   try {
-    execFileSync("docker", ["image", "inspect", tag], { stdio: "pipe", timeout: 10_000 });
+    execFileSync("docker", ["image", "inspect", tag], {
+      stdio: "pipe",
+      timeout: 10_000,
+    });
     return true;
   } catch {
     return false;
@@ -1066,8 +1118,12 @@ async function executeLocalRender(
     ...(options.pageNavigationTimeoutMs != null
       ? { pageNavigationTimeout: options.pageNavigationTimeoutMs }
       : {}),
-    ...(options.protocolTimeout != null && { protocolTimeout: options.protocolTimeout }),
-    ...(options.playerReadyTimeout != null && { playerReadyTimeout: options.playerReadyTimeout }),
+    ...(options.protocolTimeout != null && {
+      protocolTimeout: options.protocolTimeout,
+    }),
+    ...(options.playerReadyTimeout != null && {
+      playerReadyTimeout: options.playerReadyTimeout,
+    }),
     ...(options.vp9CpuUsed != null ? { vp9CpuUsed: options.vp9CpuUsed } : {}),
   });
   const request = producer.createRenderRequest({
@@ -1179,7 +1235,10 @@ async function executeLocalRender(
     renderTimeMs: elapsed,
     durationMs,
     outcome,
-    warnings: job.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
+    warnings: job.warnings.map((warning) => ({
+      code: warning.code,
+      message: warning.message,
+    })),
   };
 }
 
@@ -1894,7 +1953,10 @@ function trackRenderMetrics(
   });
 }
 
-function readOutputFootprint(outputPath: string): { fileSize: string; isDirectory: boolean } {
+function readOutputFootprint(outputPath: string): {
+  fileSize: string;
+  isDirectory: boolean;
+} {
   try {
     const stat = statSync(outputPath);
     if (!stat.isDirectory()) return { fileSize: formatBytes(stat.size), isDirectory: false };

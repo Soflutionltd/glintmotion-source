@@ -1,5 +1,6 @@
 import type { SerializedDockview } from "dockview-react";
 import { parseDockLayout } from "../components/dock/dockLayoutSchema";
+import { PANEL_IDS } from "../components/dock/panelRegistry";
 
 export type TimelineTimeDisplayMode = "time" | "frame";
 export type StudioTheme = "light" | "dark";
@@ -154,7 +155,8 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     if (typeof parsed.syncIndicatorsVisible === "boolean") {
       preferences.syncIndicatorsVisible = parsed.syncIndicatorsVisible;
     }
-    const dockLayout = parseDockLayout(parsed.dockLayout);
+    // Any registered panel: Dock.Root narrows the layout to the panels it actually mounts.
+    const dockLayout = parseDockLayout(parsed.dockLayout, PANEL_IDS);
     if (dockLayout) preferences.dockLayout = dockLayout;
     return preferences;
   } catch {

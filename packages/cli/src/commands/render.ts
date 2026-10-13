@@ -1,3 +1,5 @@
+import { captureArtifactRevision } from "../utils/artifactCapture.js";
+import { recordRenderSuccess, registerRenderOutput } from "@hyperframes/studio-server/history";
 import { failCommand, failUsage, requestCliExit } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
@@ -105,6 +107,10 @@ import { buildDockerRunArgs, resolveDockerPlatform } from "../utils/dockerRunArg
 import { createStderrTail, DockerRenderExitError } from "../utils/dockerStderrTail.js";
 import type { BrowserInstallFacts } from "../browser/installFacts.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import {
+  DOCKER_BUILD_TIMEOUT_MINUTES,
+  describeDockerBuildFailure,
+} from "../utils/dockerBuildFailure.js";
 import { runEnvironmentChecks } from "../browser/preflight.js";
 import {
   detectH264EncoderModeForRender,
@@ -761,11 +767,11 @@ function ensureDockerImage(version: string, platform: string, quiet: boolean): s
         tag,
         tmpDir,
       ],
-      { stdio: quiet ? "pipe" : "inherit", timeout: 600_000 },
+      { stdio: quiet ? "pipe" : "inherit", timeout: DOCKER_BUILD_TIMEOUT_MINUTES * 60_000 },
     );
   } catch (error: unknown) {
     const message = normalizeErrorMessage(error);
-    throw new Error(`Failed to build Docker image: ${message}`);
+    throw new Error(`Failed to build Docker image: ${message}`, { cause: error });
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -815,6 +821,12 @@ function resolveDockerHostPlatform(options: RenderOptions): string {
   return platform;
 }
 
+async function registerRenderOutputOrWarn(projectDir: string, outputPath: string): Promise<void> {
+  await registerRenderOutput(projectDir, outputPath).catch((error: unknown) =>
+    console.warn(`Render output was not registered: ${normalizeErrorMessage(error)}`),
+  );
+}
+
 // Inherited minor finding (CRAP 37.1, cyclomatic 11). This PR only added
 // `pageNavigationTimeoutMs` to the options forwarded to `buildDockerRunArgs`.
 // fallow-ignore-next-line complexity
@@ -823,6 +835,8 @@ async function renderDocker(
   outputPath: string,
   options: RenderOptions,
 ): Promise<SingleRenderResult> {
+  await registerRenderOutputOrWarn(projectDir, outputPath);
+  const capture = await captureArtifactRevision(projectDir).catch(() => undefined);
   const startTime = Date.now();
 
   // Dev mode (tsx/ts-node) uses "latest" since the local version isn't on npm
@@ -837,15 +851,8 @@ async function renderDocker(
   try {
     imageTag = ensureDockerImage(dockerVersion, platform, options.quiet);
   } catch (error: unknown) {
-    const message = normalizeErrorMessage(error);
-    const isDockerMissing = /connect|not found|ENOENT/i.test(message);
-    errorBox(
-      isDockerMissing ? "Docker not available" : "Docker image build failed",
-      message,
-      isDockerMissing
-        ? "Install Docker: https://docs.docker.com/get-docker/"
-        : "Check Docker is running: docker info",
-    );
+    const failure = describeDockerBuildFailure(error);
+    errorBox(failure.title, failure.message, failure.hint);
     failCommand();
   }
 
@@ -919,6 +926,9 @@ async function renderDocker(
   // so any late throw here (telemetry flush, feedback prompt) cannot flip
   // the exit code.
   markRenderSucceeded();
+  await runPostRenderStepAsync("recordRenderSuccess", () =>
+    recordRenderSuccess(projectDir, outputPath, "completed", capture).then(() => {}),
+  );
 
   // Track metrics (no job object available from Docker — use a minimal stub)
   runPostRenderStep("trackRenderComplete", () =>
@@ -981,6 +991,8 @@ async function executeLocalRender(
   options: RenderOptions,
   cancellation: ReturnType<typeof createRenderCancellationScope>,
 ): Promise<SingleRenderResult> {
+  await registerRenderOutputOrWarn(projectDir, outputPath);
+  const capture = await captureArtifactRevision(projectDir).catch(() => undefined);
   cancellation.checkAncestors();
   cancellation.signal.throwIfAborted();
   let recoveredOrphanTrees = 0;
@@ -1193,6 +1205,14 @@ async function executeLocalRender(
   // the exit code. Field signal ts=1784169760 / ts=1784171150 / ts=1784172467
   // (win32/x64, CLI 0.7.58): valid MP4 on disk, exited 1 with no error print.
   markRenderSucceeded();
+  await runPostRenderStepAsync("recordRenderSuccess", () =>
+    recordRenderSuccess(
+      projectDir,
+      outputPath,
+      job.outcome === "completed_with_warnings" ? "completed_with_warnings" : "completed",
+      capture,
+    ).then(() => {}),
+  );
 
   maybeConsumeDeParallelRouterTrial(deParallelRouterActive, job, options.quiet);
   const elapsed = Date.now() - startTime;

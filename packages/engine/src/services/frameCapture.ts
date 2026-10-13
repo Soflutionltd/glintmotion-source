@@ -9,6 +9,7 @@
  */
 
 import {
+  CDPSession,
   type Browser,
   type Page,
   type Protocol,
@@ -1414,6 +1415,15 @@ async function constructCaptureSession(
 
   const page = await browser.newPage();
   onPageCreated(page);
+  // Cap the existing session's inspection buffer; new sessions have separate buffers.
+  const frame = page.mainFrame();
+  // Frame.client is runtime-only, so keep capture working when it is absent.
+  if ("client" in frame && frame.client instanceof CDPSession) {
+    await frame.client.send("Network.enable", {
+      maxTotalBufferSize: 32 * 1024 * 1024,
+      maxResourceBufferSize: 16 * 1024 * 1024,
+    });
+  }
   // Polyfill esbuild's keepNames helper inside the page.
   //
   // The engine is published as raw TypeScript (`packages/engine/package.json`

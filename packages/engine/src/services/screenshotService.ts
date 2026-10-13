@@ -7,6 +7,7 @@
 
 // fallow-ignore-file code-duplication
 import { type Page } from "puppeteer-core";
+import { withVideoFrameSources, type VideoFrameUpdate } from "./videoFrameTransport.js";
 import { type CaptureOptions } from "../types.js";
 import { COLOR_GRADING_SOURCE_HIDDEN_ATTR } from "@hyperframes/core/color-grading";
 import {
@@ -643,10 +644,19 @@ export async function injectVideoFramesBatch(
   updates: Array<{ videoId: string; dataUri: string }>,
 ): Promise<string[]> {
   if (updates.length === 0) return [];
+  return withVideoFrameSources(page, updates, (resolved) =>
+    injectResolvedVideoFramesBatch(page, resolved),
+  );
+}
+
+async function injectResolvedVideoFramesBatch(
+  page: Page,
+  updates: VideoFrameUpdate[],
+): Promise<string[]> {
   return await page.evaluate(
     // fallow-ignore-next-line complexity
     async (
-      items: Array<{ videoId: string; dataUri: string; frameId: string }>,
+      items: Array<VideoFrameUpdate & { frameId: string }>,
       visualProperties: string[],
       colorGradingSourceHiddenAttr: string,
     ) => {
@@ -795,8 +805,11 @@ export async function injectVideoFramesBatch(
 
         img.decoding = "sync";
         if (img.getAttribute("src") !== item.dataUri) {
+          if (item.crossOrigin) img.crossOrigin = item.crossOrigin;
+          else img.removeAttribute("crossorigin");
           img.src = item.dataUri;
-          const source = item.dataUri.startsWith("data:") ? "inline frame" : item.dataUri;
+          const source =
+            item.sourceLabel ?? (item.dataUri.startsWith("data:") ? "inline frame" : item.dataUri);
           pendingDecodes.push(
             img.decode().catch((error: unknown) => {
               throw new Error(

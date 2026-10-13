@@ -1,3 +1,4 @@
+import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
@@ -23,6 +24,7 @@ import { normalizeErrorMessage } from "./errorMessage.js";
 import { ambiguousIssue, type MotionFrame } from "./motionAudit.js";
 import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js";
 import { serveStaticProjectHtml } from "./staticProjectServer.js";
+import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
 import { resolveAutoProxy } from "./projectConfig.js";
 import {
   decideMediaProxyEligibility,
@@ -231,6 +233,10 @@ export async function runBrowserCheck(
     for (const entry of await auditClipDurations(page, analyzeClipMediaFit, options.timeout)) {
       drafts.push({ code: "clip_media_fit", severity: entry.level, message: entry.text, time: 0 });
     }
+    for (const tail of findTweenTails((await page.evaluate(collectTweenRecords)) ?? [])) {
+      const message = tweenTailMessage(tail);
+      drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
+    }
     const driver = createPageDriver(page, (time) => {
       currentTime = time;
     });
@@ -284,7 +290,7 @@ export async function captureFindingCrops(
     const page = session.page;
     await waitForPreferredSeekTarget(page);
 
-    const snapshotDir = join(project.dir, "snapshots");
+    const snapshotDir = checkSnapshotDirectory(project.dir);
     mkdirSync(snapshotDir, { recursive: true });
     for (const request of requests) {
       await seekCompositionTimeline(page, request.time, AUDIT_SEEK_OPTIONS);
@@ -295,7 +301,7 @@ export async function captureFindingCrops(
       const region = padCropRegion(request.bbox, canvas, DEFAULT_ZOOM_PADDING_PX);
       const buffer = await captureRegionCrop(page, region, DEFAULT_ZOOM_SCALE);
       writeFileSync(join(snapshotDir, request.filename), buffer);
-      written.push(join("snapshots", request.filename));
+      written.push(join(snapshotDir, request.filename));
     }
     return written;
   } finally {
@@ -522,6 +528,8 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], currentTime: (
 function createPageDriver(page: Page, setTime: (time: number) => void): CheckAuditDriver {
   return {
     initialize: (contrast) => injectAuditScripts(page, contrast),
+    matchComponents: (components, findings) =>
+      page.evaluate(matchComponentFindings, { components, findings }),
     getDuration: () => getCompositionDuration(page),
     hasNoTimelineDeclaration: () => hasNoTimelineDeclaration(page),
     getTransitionBoundaries: () => collectTweenBoundaries(page),
@@ -1474,4 +1482,35 @@ function urlPath(url: string): string {
   } catch {
     return url;
   }
+}
+
+export function matchComponentFindings({
+  components,
+  findings,
+}: {
+  components: string[];
+  findings: CheckFinding[];
+}): boolean[] {
+  const roots = components.flatMap((selector) => {
+    const matches = [...document.querySelectorAll(selector)];
+    if (!matches.length) throw new Error(`Component selector matched nothing: ${selector}`);
+    return matches;
+  });
+  function matchesSelector(selector: string): boolean | null {
+    try {
+      const elements = [...document.querySelectorAll(selector)];
+      if (!elements.length) return null;
+      return elements.some((el) => roots.some((root) => root.contains(el)));
+    } catch {
+      return null;
+    }
+  }
+  return findings.map((finding) => {
+    if (!finding.selector || finding.selector === "[data-composition-id]") return true;
+    const container = Reflect.get(finding, "containerSelector");
+    return (
+      matchesSelector(finding.selector) !== false ||
+      (typeof container === "string" && matchesSelector(container) !== false)
+    );
+  });
 }

@@ -10,6 +10,7 @@ import {
 } from "../capture/captureCompositionFrame.js";
 import { DEFAULT_CHECK_OPTIONS, runAuditGrid } from "./checkPipeline.js";
 import {
+  matchComponentFindings,
   captureOverviewShot,
   keepBrokenImageAborts,
   preResolveHostileMediaProxies,
@@ -999,3 +1000,35 @@ function fakePage() {
     }),
   });
 }
+
+describe("component output membership", () => {
+  it("includes descendants and either side of a collision; keeps unresolved findings", () => {
+    document.body.innerHTML =
+      '<section id="selected"><span id="child"></span></section><section id="other"><span id="outside"></span></section>';
+    const finding = (selector: string, containerSelector?: string) => ({
+      code: "content_overlap",
+      severity: "error" as const,
+      selector,
+      containerSelector,
+      sourceFile: "index.html",
+      dataAttributes: {},
+      bbox: { x: 0, y: 0, width: 1, height: 1 },
+      time: 1,
+      message: "collision",
+    });
+    expect(
+      matchComponentFindings({
+        components: ["#selected"],
+        findings: [
+          finding("#child"),
+          finding("#outside", "#child"),
+          finding("#outside", "#other"),
+          finding("#gone"),
+        ],
+      }),
+    ).toEqual([true, true, false, true]);
+    expect(() => matchComponentFindings({ components: ["#missing"], findings: [] })).toThrow(
+      "matched nothing",
+    );
+  });
+});

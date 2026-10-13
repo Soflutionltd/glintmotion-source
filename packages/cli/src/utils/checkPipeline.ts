@@ -1,3 +1,4 @@
+import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { findingElementKey, groupSampledFindings } from "./checkFindings.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -132,31 +133,74 @@ function gateSampleTimes(
   return mergeSampleTimes(fractions.map((fraction) => fraction * duration));
 }
 
+function validateSampleRange([start, end]: [number, number], duration: number): void {
+  if (!Number.isFinite(start + end) || start < 0 || end <= start || end > duration)
+    throw new Error(`Check range must lie within the composition duration (${duration} seconds)`);
+}
+
+function gateSamplesInRange(
+  flag: "--caption-zone" | "--frame-check",
+  samples: number[],
+  inRange: (time: number) => boolean,
+  range: [number, number] | undefined,
+): number[] {
+  if (!range) return samples;
+  const selected = samples.filter(inRange);
+  if (samples.length > 0 && selected.length === 0) {
+    throw new Error(`No ${flag} seek samples lie within --range`);
+  }
+  return selected;
+}
+
+function layoutSamplesInRange(options: CheckOptions, duration: number) {
+  if (!options.range)
+    return {
+      inRange: (_t: number) => true,
+      baseSamples: buildLayoutSampleTimes({ duration, samples: options.samples, at: options.at }),
+    };
+  validateSampleRange(options.range, duration);
+  const [start, end] = options.range;
+  const inRange = (t: number) => t >= start && t <= end;
+  const selected = (options.at ?? []).filter(inRange);
+  if (options.at?.length && !selected.length) throw new Error("No --at samples lie within --range");
+  const baseSamples = buildLayoutSampleTimes({
+    duration: end - start,
+    samples: options.samples,
+    at: selected.map((t) => t - start),
+  }).map((t) => t + start);
+  return { inRange, baseSamples };
+}
+
 async function buildSampleGrid(
   driver: CheckAuditDriver,
   options: CheckOptions,
 ): Promise<SampleGrid> {
   const duration = await driver.getDuration();
-  const baseSamples = buildLayoutSampleTimes({
-    duration,
-    samples: options.samples,
-    at: options.at,
-  });
+  const { inRange, baseSamples } = layoutSamplesInRange(options, duration);
   const transitions = options.atTransitions
     ? buildTransitionSampleTimes({
         duration,
-        boundaries: await driver.getTransitionBoundaries(),
+        boundaries: (await driver.getTransitionBoundaries()).filter(inRange),
         cap: options.maxTransitionSamples,
       })
     : { times: [], dropped: 0 };
-  const captionSamples = options.captionZone
-    ? gateSampleTimes(duration, options.captionZone.seek, 1)
-    : [];
-  const frameSamples = options.frameCheck
-    ? gateSampleTimes(duration, options.frameCheck.seek, 0.5)
-    : [];
-  const auditSamples = mergeSampleTimes(baseSamples, transitions.times);
-  const layoutSamples = mergeSampleTimes(auditSamples, captionSamples, frameSamples);
+  const captionSamples = gateSamplesInRange(
+    "--caption-zone",
+    options.captionZone ? gateSampleTimes(duration, options.captionZone.seek, 1) : [],
+    inRange,
+    options.range,
+  );
+  const frameSamples = gateSamplesInRange(
+    "--frame-check",
+    options.frameCheck ? gateSampleTimes(duration, options.frameCheck.seek, 0.5) : [],
+    inRange,
+    options.range,
+  );
+  transitions.times = transitions.times.filter(inRange);
+  const auditSamples = mergeSampleTimes(baseSamples, transitions.times).filter(inRange);
+  const layoutSamples = mergeSampleTimes(auditSamples, captionSamples, frameSamples).filter(
+    inRange,
+  );
   if (layoutSamples.length === 0) {
     throw new Error("Could not determine composition duration — no layout samples run");
   }
@@ -433,7 +477,7 @@ async function collectGridSamples(
       collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
     }
   }
-  await collectMotionOverlapSamples(driver, grid, collected);
+  await collectMotionOverlapSamples(driver, grid, collected, options.range);
   return collected;
 }
 
@@ -459,9 +503,14 @@ async function collectMotionOverlapSamples(
   driver: CheckAuditDriver,
   grid: SampleGrid,
   collected: GridSamples,
+  range?: [number, number],
 ): Promise<void> {
   const baseTimes = new Set(grid.layoutSamples);
-  for (const time of buildOverlapSampleTimes(grid.duration)) {
+  const overlapTimes = buildOverlapSampleTimes(range ? range[1] - range[0] : grid.duration);
+  const shiftedTimes = range
+    ? mergeSampleTimes(overlapTimes.map((time) => time + range[0]))
+    : overlapTimes;
+  for (const time of shiftedTimes) {
     if (baseTimes.has(time)) continue;
     // Settle-free seek: collectOverlap reads getBoundingClientRect geometry, valid synchronously after setTime, so the dense pass skips the per-seek paint settle.
     await driver.seekGeometry(time);
@@ -1098,7 +1147,11 @@ export async function runAuditGrid(
 ): Promise<CheckBrowserResult> {
   await driver.initialize(options.contrast);
   const grid = await buildSampleGrid(driver, options);
-  const plan = await planMotionSampling(driver, motion, grid.duration);
+  const plan = await planMotionSampling(
+    driver,
+    options.range ? { kind: "none" } : motion,
+    grid.duration,
+  );
   const seekLoopStart = Date.now();
   const collected = await collectGridSamples(driver, options, grid, plan);
   const seekLoopMs = Date.now() - seekLoopStart;
@@ -1113,18 +1166,36 @@ export async function runAuditGrid(
     motionIssues = [...motionIssues, ...(await driver.anchorMotionIssues(evaluated))];
   }
   const userPicked = new Set(grid.userPickedSamples);
-  const sweepFindings = detectSweepStatic(
-    grid.duration,
-    collected.layoutStateSignatures.filter((sample) => !userPicked.has(sample.time)),
-    motionIssues,
-    await driver.hasNoTimelineDeclaration(),
-  );
+  const sweepFindings = options.range
+    ? []
+    : detectSweepStatic(
+        grid.duration,
+        collected.layoutStateSignatures.filter((sample) => !userPicked.has(sample.time)),
+        motionIssues,
+        await driver.hasNoTimelineDeclaration(),
+      );
   const rotationFindings = detectRotationPivotDrift(
     collected.rotationSamples,
     await driver.getCanvas(),
   );
   const offPivotFindings = detectOffPivotRotation(collected.indicatorFrames);
   const contrast = buildContrastResults(collected.contrastEntries);
+  if (options.components?.length) {
+    if (!driver.matchComponents)
+      throw new Error("Component filtering unavailable in this check driver");
+    const findings = [
+      ...collected.layoutIssues,
+      ...sweepFindings,
+      ...rotationFindings,
+      ...offPivotFindings,
+      ...motionIssues,
+      ...contrast.findings,
+    ];
+    const matches = await driver.matchComponents(options.components, findings);
+    findings.forEach((finding, i) => {
+      finding.componentMatch = matches[i];
+    });
+  }
   return {
     duration: grid.duration,
     layoutSamples: grid.layoutSamples,
@@ -1413,8 +1484,11 @@ function buildReport(
   hdrPromotion: CheckReport["hdr"]["autoPromotion"] = null,
   hdrInspection: CheckReport["hdr"]["inspection"] = "available",
 ): CheckReport {
-  const layout = shapeLayoutSection(browser.layoutIssues, browser, options);
-  const shapedMotion = shapeLayoutFindings(browser.motionIssues, options);
+  const shaping = options.components?.length
+    ? { ...options, maxIssues: Number.MAX_SAFE_INTEGER }
+    : options;
+  const layout = shapeLayoutSection(browser.layoutIssues, browser, shaping);
+  const shapedMotion = shapeLayoutFindings(browser.motionIssues, shaping);
   const motionFindings: CheckFinding[] = [...shapedMotion.findings, ...extraMotionFindings];
   const runtime = section(browser.runtimeFindings);
   const motionSection = section(motionFindings);
@@ -1440,7 +1514,7 @@ function buildReport(
     layout,
     motion: {
       ...motionSection,
-      enabled: motion.kind !== "none",
+      enabled: motion.kind !== "none" && !options.range,
       specPath: motion.kind === "none" ? undefined : motion.path,
       samples: browser.motionSampleCount,
     },
@@ -1461,7 +1535,7 @@ function buildReport(
   };
   trackCheckReport({
     contrastGate: options.contrast,
-    motionGate: motion.kind !== "none",
+    motionGate: motion.kind !== "none" && !options.range,
     captionZoneGate: options.captionZone !== undefined,
     frameCheckGate: options.frameCheck !== undefined,
     snapshotsGate: options.snapshots,
@@ -1484,6 +1558,38 @@ function buildReport(
     exitCode: checkExitCode(report),
     runId: getRunId(),
   });
+  return filterComponentReport(report, options);
+}
+
+function filterComponentReport(report: CheckReport, options: CheckOptions): CheckReport {
+  if (!options.range && !options.components?.length) return report;
+  {
+    report.scope = {
+      range: options.range,
+      components: options.components,
+      hiddenFindings: 0,
+      notes: [
+        "Static lint and unscoped runtime failures remain project-wide.",
+        ...(options.range
+          ? [
+              "Whole-timeline motion assertions and frozen-sweep detection are skipped for range checks.",
+            ]
+          : []),
+      ],
+    };
+    for (const group of [report.layout, report.motion, report.contrast]) {
+      const before = group.findings.length;
+      group.findings = group.findings.filter((f) => f.componentMatch !== false);
+      report.scope.hiddenFindings += before - group.findings.length;
+      if (group !== report.contrast && group.findings.length > options.maxIssues) {
+        group.findings = group.findings.slice(0, options.maxIssues);
+        report.scope.notes.push(
+          "Selected findings exceed --max-issues; increase it to see the remainder.",
+        );
+        if (group === report.layout) report.layout.truncated = true;
+      }
+    }
+  }
   return report;
 }
 
@@ -1644,12 +1750,12 @@ async function writeSnapshot(
   time: number,
   pngBase64: string,
 ): Promise<string> {
-  const snapshotDir = join(projectDir, "snapshots");
+  const snapshotDir = checkSnapshotDirectory(projectDir);
   mkdirSync(snapshotDir, { recursive: true });
   const filename = `frame-${String(index).padStart(2, "0")}-at-${time.toFixed(1)}s.png`;
   const path = join(snapshotDir, filename);
   writeFileSync(path, Buffer.from(pngBase64, "base64"));
-  return join("snapshots", filename);
+  return relative(projectDir, path);
 }
 
 async function captureFindingCrops(

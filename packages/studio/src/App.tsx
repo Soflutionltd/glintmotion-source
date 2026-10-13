@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useMemo, type SetStateAction } from "rea
 import { useStableHandlers } from "./hooks/useStableHandlers";
 import { useHistoryFlags, useToolbarSession } from "./hooks/useShellSlices";
 import { useDismissingTabSetter, useRightPanelIntent } from "./hooks/useRightPanelIntents";
-import { useRenderQueue } from "./components/renders/useRenderQueue";
+import { useExportQueue } from "./components/desktop/useDesktopExportDestination";
 import { usePlayerStore } from "./player";
 import { StudioOverlays } from "./components/StudioOverlays";
 import { SaveQueuePausedBanner } from "./components/SaveQueuePausedBanner";
@@ -143,7 +143,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
   );
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
-  const renderQueue = useStableHandlers(useRenderQueue(projectId, activeCompPathRef), projectId);
+  const renderQueue = useStableHandlers(useExportQueue(projectId, activeCompPathRef), projectId);
   const previewPersistenceResult = usePreviewPersistence({
     showToast,
     readOptionalProjectFile: fileManager.readOptionalProjectFile,

@@ -42,15 +42,20 @@ export const DeliverMenu = memo(function DeliverMenu({ filename }: { filename: s
 
   if (!host) return null;
 
-  const deliver = (preset: DeliveryPreset) => {
+  const deliver = async (preset: DeliveryPreset) => {
     if (running) return;
     setRunning(preset);
     setResult(null);
-    host.deliver
-      .render({ filename, preset, color })
-      .then((file) => setResult({ text: `Saved ${file.split("/").pop() ?? file}`, file }))
-      .catch((reason: unknown) => setResult({ text: hostErrorMessage(reason), file: null }))
-      .finally(() => setRunning(null));
+    try {
+      const target = await host.exports.choose({ format: "mp4", suffix: preset });
+      if (!target) return;
+      const file = await host.deliver.render({ filename, preset, color, target: target.id });
+      setResult({ text: `Saved ${file.split("/").pop() ?? file}`, file });
+    } catch (reason: unknown) {
+      setResult({ text: hostErrorMessage(reason), file: null });
+    } finally {
+      setRunning(null);
+    }
   };
 
   const changeColor = (value: string) => {
@@ -85,14 +90,14 @@ export const DeliverMenu = memo(function DeliverMenu({ filename }: { filename: s
             className="fixed z-[1000] w-60 rounded-xl border border-panel-border bg-panel-bg p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_12px_40px_rgba(0,0,0,0.06)]"
           >
             <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
-              HEVC, sound levelled for Instagram (-14 LUFS). Saved next to the render.
+              HEVC, sound levelled for Instagram (-14 LUFS). You choose where it is saved.
             </p>
             {PRESETS.map((preset) => (
               <button
                 key={preset.id}
                 type="button"
                 disabled={running !== null}
-                onClick={() => deliver(preset.id)}
+                onClick={() => void deliver(preset.id)}
                 className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-panel-text-1 transition-colors hover:bg-panel-input disabled:opacity-40"
               >
                 <span>{running === preset.id ? "Exporting…" : preset.label}</span>

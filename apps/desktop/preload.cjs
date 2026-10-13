@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld("glintmotion", {
     firstVideoParts: () => ipcRenderer.invoke("home:firstVideoParts"),
     project: (request) => ipcRenderer.invoke("home:start", request),
   },
+  exports: {
+    choose: (request) => ipcRenderer.invoke("exports:choose", request),
+    save: (request) => ipcRenderer.invoke("exports:save", request),
+  },
   mcp: {
     info: () => ipcRenderer.invoke("mcp:info"),
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),

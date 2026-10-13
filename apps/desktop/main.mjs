@@ -6,13 +6,16 @@ import {
   dialog,
   ipcMain,
   Menu,
+  Notification,
   powerMonitor,
   safeStorage,
   shell,
 } from "electron";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,6 +27,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { copyFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -42,6 +46,7 @@ import { checkResolution, FIRST_VIDEO_PARTS, firstVideoPrompt, projectNameFor, r
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
 const DEFAULT_PROJECTS_DIR = join(homedir(), "Movies", APP_NAME);
+const DEFAULT_EXPORTS_DIR = join(homedir(), "Movies");
 const MAX_RECENTS = 24;
 // The studio keeps its layout and the agent chat in localStorage, which is per origin: on a
 // new port each launch, every launch would start from nothing.
@@ -706,22 +711,86 @@ async function composeMusic(request) {
 }
 ipcMain.handle("music:generate", (_event, request) => composeMusic(request));
 ipcMain.handle("motion:check", () => checkMotion({}));
-ipcMain.handle("deliver:render", (_event, request) =>
-  trackDelivery(
+const EXPORT_KINDS = { mp4: "Vidéo MP4", mov: "Vidéo QuickTime", webm: "Vidéo WebM" };
+/** project dir -> folder its last export went to. */
+const exportDirs = createPersistentMap(join(app.getPath("userData"), "export-dirs.json"));
+/** One-use id -> path the person picked; the studio never names a destination itself. */
+const exportTargets = new Map();
+const savedExports = new Set();
+
+async function chooseExportTarget(request) {
+  const projectDir = openProjectDir();
+  const format = Object.hasOwn(EXPORT_KINDS, request?.format) ? request.format : "mp4";
+  const suffix = /^[a-z]+$/.test(request?.suffix ?? "") ? `_${request.suffix}` : "";
+  const folder = exportDirs.get(projectDir) ?? DEFAULT_EXPORTS_DIR;
+  const result = await dialog.showSaveDialog(win, {
+    title: "Où enregistrer l'export ?",
+    buttonLabel: "Exporter",
+    defaultPath: join(existsSync(folder) ? folder : homedir(), `${basename(projectDir)}${suffix}.${format}`),
+    filters: [{ name: EXPORT_KINDS[format], extensions: [format] }],
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+  });
+  if (result.canceled || !result.filePath) return null;
+  exportDirs.set(projectDir, dirname(result.filePath));
+  const id = randomUUID();
+  exportTargets.set(id, { projectDir, path: result.filePath });
+  return { id, path: result.filePath };
+}
+
+function takeExportTarget(id) {
+  const target = exportTargets.get(String(id));
+  if (!target) throw new Error("Destination d'export inconnue : choisis-la à nouveau.");
+  exportTargets.delete(String(id));
+  return target;
+}
+
+/** Same volume: APFS clones the file instantly instead of copying it. */
+async function copyToTarget(source, target) {
+  await copyFile(source, target.path, fsConstants.COPYFILE_FICLONE);
+  savedExports.add(target.path);
+  if (Notification.isSupported()) {
+    const notice = new Notification({ title: "Export enregistré", body: basename(target.path), silent: true });
+    notice.on("click", () => shell.showItemInFolder(target.path));
+    notice.show();
+  }
+  return target.path;
+}
+
+/** The studio does not wait on this call: every failure is told to the person here. */
+async function saveExport(request) {
+  try {
+    const target = takeExportTarget(request?.id);
+    const name = basename(String(request?.filename ?? ""));
+    const source = join(target.projectDir, "renders", name);
+    if (!name || name !== request.filename || !existsSync(source)) throw new Error(`Rendu introuvable : ${name}`);
+    return await copyToTarget(source, target);
+  } catch (error) {
+    await dialog.showMessageBox(win ?? undefined, {
+      type: "error",
+      message: "L'export n'a pas pu être enregistré à l'endroit choisi.",
+      detail: `${error.message}\n\nIl reste dans le dossier renders du projet.`,
+    });
+    return null;
+  }
+}
+
+ipcMain.handle("exports:choose", (_event, request) => chooseExportTarget(request));
+ipcMain.handle("exports:save", (_event, request) => saveExport(request));
+ipcMain.handle("deliver:render", async (_event, request) => {
+  const target = takeExportTarget(request?.target);
+  const output = await trackDelivery(
     deliverRender({
-      projectDir: openProjectDir(),
+      projectDir: target.projectDir,
       filename: request?.filename,
       preset: request?.preset,
       color: request?.color,
     }),
-  ),
-);
+  );
+  return copyToTarget(output, target);
+});
 ipcMain.handle("deliver:reveal", (_event, file) => {
-  const projectDir = openProjectDir();
   const path = String(file ?? "");
-  if (!path.startsWith(join(projectDir, "renders") + "/") || !existsSync(path)) {
-    throw new Error("Fichier introuvable dans les rendus du projet.");
-  }
+  if (!savedExports.has(path) || !existsSync(path)) throw new Error("Fichier introuvable.");
   shell.showItemInFolder(path);
 });
 

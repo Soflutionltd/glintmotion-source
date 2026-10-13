@@ -64,12 +64,22 @@ export interface DesktopHost {
     /** Watches every tween of the saved project frame by frame; about 0.3 s per tween. */
     check: () => Promise<MotionCheckReport>;
   };
+  exports: {
+    /** Asks where the export goes; null when the person cancels. The id is valid for one save. */
+    choose: (request: {
+      format: "mp4" | "mov" | "webm";
+      suffix?: string;
+    }) => Promise<{ id: string; path: string } | null>;
+    /** Copies a finished render to its chosen place; null when it failed (the app says why). */
+    save: (request: { id: string; filename: string }) => Promise<string | null>;
+  };
   deliver: {
-    /** Resolves to the delivered file's absolute path. */
+    /** Resolves to the delivered file's absolute path, at the `target` from exports.choose. */
     render: (request: {
       filename: string;
       preset: DeliveryPreset;
       color: string;
+      target: string;
     }) => Promise<string>;
     reveal: (file: string) => Promise<void>;
   };

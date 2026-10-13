@@ -1,0 +1,12 @@
+name = "glintmotion-updater"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+account_id = "a4b52d0892a12d1c1bbd8bf93c70c3f7"
+workers_dev = true
+
+# Must match UPDATE_BASE in apps/desktop/updater.mjs and media-src in ui/whats-new.html.
+routes = [{ pattern = "glintmotion-updates.soflution.com", custom_domain = true }]
+
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "glintmotion-releases"

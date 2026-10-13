@@ -41,6 +41,31 @@ contextBridge.exposeInMainWorld("glintmotion", {
     account: (action) => ipcRenderer.invoke("claude:account", action),
     cancel: () => ipcRenderer.invoke("claude:cancel"),
   },
+  updates: {
+    state: () => ipcRenderer.invoke("updates:state"),
+    restartNow: () => ipcRenderer.invoke("updates:restart"),
+    reportBusy: (busy) => ipcRenderer.send("updates:busy", Boolean(busy)),
+    onState: (callback) => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on("updates:state", listener);
+      return () => ipcRenderer.removeListener("updates:state", listener);
+    },
+    onPrepare: (prepare) => {
+      const listener = async (_event, id) => {
+        try {
+          await prepare();
+        } finally {
+          ipcRenderer.send("updates:prepared", id);
+        }
+      };
+      ipcRenderer.on("updates:prepare", listener);
+      return () => ipcRenderer.removeListener("updates:prepare", listener);
+    },
+  },
+  whatsNew: {
+    data: () => ipcRenderer.invoke("whatsNew:data"),
+    close: () => ipcRenderer.invoke("whatsNew:close"),
+  },
   agent: {
     models: () => ipcRenderer.invoke("agent:models"),
     send: (request) => ipcRenderer.invoke("agent:send", request),

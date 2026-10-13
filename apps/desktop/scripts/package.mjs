@@ -70,6 +70,8 @@ const [appPath] = await packager({
     /^\/build($|\/)/,
     /^\/bin($|\/)/,
     /^\/vendor($|\/)/,
+    /^\/updater-worker($|\/)/,
+    /^\/release-notes($|\/)/,
     /^\/package-lock\.json$/,
     /\.test\.mjs$/,
   ],

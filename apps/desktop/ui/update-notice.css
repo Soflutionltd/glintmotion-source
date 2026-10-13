@@ -1,0 +1,89 @@
+#gm-update-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147483647;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 400px;
+  padding: 14px 14px 14px 18px;
+  border: 1px solid rgb(17 17 17 / 0.07);
+  border-radius: 16px;
+  background: #fafaf8;
+  box-shadow:
+    0 1px 2px rgb(17 17 17 / 0.05),
+    0 8px 24px rgb(17 17 17 / 0.1),
+    0 24px 48px rgb(17 17 17 / 0.08);
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#gm-update-notice[hidden] {
+  display: none;
+}
+
+#gm-update-notice .gm-update-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+#gm-update-notice p {
+  margin: 0;
+}
+
+#gm-update-notice button {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: all 160ms ease-out;
+}
+
+#gm-update-notice button[hidden] {
+  display: none;
+}
+
+#gm-update-notice .gm-update-restart {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #1f8a5b;
+  color: #fafaf8;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#gm-update-notice .gm-update-restart:hover {
+  background: #197a50;
+}
+
+#gm-update-notice .gm-update-restart:disabled {
+  opacity: 0.5;
+}
+
+#gm-update-notice .gm-update-dismiss {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: transparent;
+  color: #55565a;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#gm-update-notice .gm-update-dismiss:hover {
+  background: rgb(17 17 17 / 0.06);
+  color: #111111;
+}
+
+#gm-update-notice button:focus-visible {
+  outline: 2px solid #1f8a5b;
+  outline-offset: 2px;
+}

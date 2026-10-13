@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell } from "electron";
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerMonitor, safeStorage, shell } from "electron";
 import { spawn } from "node:child_process";
 import {
   chmodSync,
@@ -23,11 +23,17 @@ import { probeMotion } from "./motion-probe.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
 import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
+import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
+import { createUpdater } from "./updater.mjs";
+import { createWhatsNew } from "./whats-new.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
 const DEFAULT_PROJECTS_DIR = join(homedir(), "Movies", APP_NAME);
 const MAX_RECENTS = 24;
+// The studio keeps its layout and the agent chat in localStorage, which is per origin: on a
+// new port each launch, every launch would start from nothing.
+const STUDIO_PORT = 47_831;
 
 app.setName(APP_NAME);
 
@@ -72,6 +78,8 @@ document.addEventListener("click", (event) => {
   if (event.target.closest('svg[aria-label="Glintmotion"]')) window.glintmotion.home();
 }, true);
 `;
+const UPDATE_NOTICE_CSS = readFileSync(join(here, "ui", "update-notice.css"), "utf-8");
+const UPDATE_NOTICE_JS = readFileSync(join(here, "ui", "update-notice.js"), "utf-8");
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -118,12 +126,16 @@ function projectInfo(dir, openedAt) {
   };
 }
 
-function freePort() {
+/** `preferred` when it is free, otherwise any free port. */
+function freePort(preferred = 0) {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.unref();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.on("error", (error) => {
+      if (preferred && error.code === "EADDRINUSE") freePort().then(resolve, reject);
+      else reject(error);
+    });
+    server.listen(preferred, "127.0.0.1", () => {
       const { port } = server.address();
       server.close(() => resolve(port));
     });
@@ -141,12 +153,14 @@ function stopStudio() {
   studio = null;
 }
 
-async function openStudio(dir) {
+/** `hash` is a studio URL hash (composition, playhead, selection, panel) to reopen at. */
+async function openStudio(dir, hash = "") {
   if (!existsSync(join(dir, "index.html"))) {
     throw new Error(`${basename(dir)} n'est pas un projet Glintmotion (pas de index.html).`);
   }
   stopStudio();
-  const port = await freePort();
+  rendererBusy = false;
+  const port = await freePort(STUDIO_PORT);
   const child = runEngine(["preview", dir, "--no-open", "--foreground", "--force-new", "--port", String(port)], dir);
   studio = { child, dir, url: null };
 
@@ -172,11 +186,12 @@ async function openStudio(dir) {
   studio.url = url;
   rememberProject(dir);
   win.setTitle(`${APP_NAME} · ${basename(dir)}`);
-  await win.loadURL(url);
+  await win.loadURL(`${url}${hash}`);
 }
 
 async function goHome(action) {
   stopStudio();
+  rendererBusy = false;
   win.setTitle(APP_NAME);
   await win.loadFile(join(here, "ui", "index.html"), action === "new" ? { hash: "new" } : {});
 }
@@ -274,8 +289,8 @@ function agentMcpArgs() {
 
 /** @type {{ child: import("node:child_process").ChildProcess, dir: string } | null} */
 let agentRun = null;
-/** @type {Map<string, string>} project dir -> Claude Code session id */
-const agentSessions = new Map();
+/** project dir -> Claude Code session id, kept on disk so a chat goes on after a restart. */
+const agentSessions = createPersistentMap(join(app.getPath("userData"), "agent-sessions.json"));
 
 function locateClaude() {
   const candidates = [
@@ -548,7 +563,7 @@ function startMcp() {
       renders,
       motionProbe: checkMotion,
       generateMusic: composeMusic,
-      deliver: (request) => deliverRender({ projectDir: agentProjectDir(), ...request }),
+      deliver: (request) => trackDelivery(deliverRender({ projectDir: agentProjectDir(), ...request })),
       createProject,
       defaultParent: DEFAULT_PROJECTS_DIR,
     },
@@ -655,12 +670,14 @@ async function composeMusic(request) {
 ipcMain.handle("music:generate", (_event, request) => composeMusic(request));
 ipcMain.handle("motion:check", () => checkMotion({}));
 ipcMain.handle("deliver:render", (_event, request) =>
-  deliverRender({
-    projectDir: openProjectDir(),
-    filename: request?.filename,
-    preset: request?.preset,
-    color: request?.color,
-  }),
+  trackDelivery(
+    deliverRender({
+      projectDir: openProjectDir(),
+      filename: request?.filename,
+      preset: request?.preset,
+      color: request?.color,
+    }),
+  ),
 );
 ipcMain.handle("deliver:reveal", (_event, file) => {
   const projectDir = openProjectDir();
@@ -678,6 +695,69 @@ ipcMain.handle("claude:cancel", () => {
   accountRun.cancelled = true;
   accountRun.child.kill("SIGTERM");
 });
+
+/** Playback or a studio export, as the studio reports it. */
+let rendererBusy = false;
+let deliveries = 0;
+function trackDelivery(promise) {
+  deliveries++;
+  return promise.finally(() => deliveries--);
+}
+
+const resumeFile = () => join(app.getPath("userData"), "resume.json");
+const PREPARE_TIMEOUT_MS = 8_000;
+
+/** Lets the studio write its pending edits to disk; a studio that never answers is not waited on forever. */
+function prepareStudio() {
+  if (!win || !studio?.url || !win.webContents.getURL().startsWith(studio.url)) return Promise.resolve();
+  const id = `${Date.now()}`;
+  return new Promise((resolve) => {
+    const done = (_event, answered) => {
+      if (answered !== id) return;
+      clearTimeout(timer);
+      ipcMain.removeListener("updates:prepared", done);
+      resolve();
+    };
+    const timer = setTimeout(() => done(null, id), PREPARE_TIMEOUT_MS);
+    ipcMain.on("updates:prepared", done);
+    win.webContents.send("updates:prepare", id);
+  });
+}
+
+const updater = createUpdater({
+  updater: autoUpdater,
+  enabled: app.isPackaged,
+  isBusy: () =>
+    Boolean(agentRun || motionRun || musicRunning || accountRun || deliveries > 0 || rendererBusy) ||
+    renders.list().some((job) => job.status === "running"),
+  idleSeconds: () => powerMonitor.getSystemIdleTime(),
+  prepareRestart: async () => {
+    await prepareStudio();
+    const url = win && studio?.url ? win.webContents.getURL() : "";
+    writeResume(resumeFile(), { dir: studio?.dir ?? null, hash: url ? new URL(url).hash : "" });
+  },
+  onState: (state) => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send("updates:state", state);
+  },
+});
+ipcMain.handle("updates:state", () => updater.state());
+ipcMain.handle("updates:restart", () => updater.requestRestart());
+ipcMain.on("updates:busy", (event, busy) => {
+  if (event.sender === win?.webContents) rendererBusy = Boolean(busy);
+});
+
+const whatsNew = createWhatsNew({
+  here,
+  parent: () => win,
+  version: app.getVersion(),
+  seenFile: join(app.getPath("userData"), "whats-new-seen.json"),
+});
+
+/** After an update restart: the project, composition, playhead and selection the person left. */
+async function resumeAfterUpdate() {
+  const resume = takeResume(resumeFile());
+  if (resume) await openStudio(resume.dir, resume.hash);
+}
 
 function buildMenu() {
   const template = [
@@ -709,6 +789,15 @@ function buildMenu() {
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Quoi de neuf dans Glintmotion",
+          click: () => whatsNew.showAll().catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -734,8 +823,8 @@ function createWindow() {
   });
   win.webContents.on("did-finish-load", () => {
     if (!win.webContents.getURL().startsWith("http://")) return;
-    win.webContents.insertCSS(STUDIO_CSS);
-    win.webContents.executeJavaScript(STUDIO_JS).catch(() => {});
+    win.webContents.insertCSS(STUDIO_CSS + UPDATE_NOTICE_CSS);
+    win.webContents.executeJavaScript(STUDIO_JS + UPDATE_NOTICE_JS).catch(() => {});
   });
   win.on("closed", () => {
     stopStudio();
@@ -749,6 +838,10 @@ app.whenReady().then(() => {
   startMcp();
   buildMenu();
   createWindow();
+  resumeAfterUpdate().catch((error) => dialog.showErrorBox(APP_NAME, error.message));
+  updater.start();
+  // Offline at launch: the notes stay unseen and show on the next launch.
+  whatsNew.showIfUpdated().catch(() => {});
   app.on("activate", () => {
     if (!win) createWindow();
   });

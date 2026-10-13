@@ -78,6 +78,12 @@ export interface DesktopHost {
     account: (action: ClaudeAccountAction) => Promise<ClaudeStatus>;
     cancel: () => Promise<void>;
   };
+  updates: {
+    /** Playback or an export running: the app holds a downloaded update until it is false. */
+    reportBusy: (busy: boolean) => void;
+    /** Runs just before an update restart; the restart waits for the promise (up to 8 s). */
+    onPrepare: (prepare: () => Promise<void>) => () => void;
+  };
   agent: {
     models: () => Promise<string[]>;
     send: (request: { prompt: string; model: string }) => Promise<void>;

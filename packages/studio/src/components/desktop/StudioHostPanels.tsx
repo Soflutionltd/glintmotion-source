@@ -3,6 +3,7 @@ import { Dock } from "../dock/Dock";
 import { getDesktopHost } from "../../utils/desktopHost";
 import { AgentPanel } from "./AgentPanel";
 import { DesktopTimelineTools, type DesktopTimelineHandlers } from "./DesktopTimelineTools";
+import { DesktopUpdateBridge } from "./DesktopUpdateBridge";
 import { FilesPanel } from "./FilesPanel";
 import { MusicPanel } from "./MusicPanel";
 import { ProjectsPanel } from "./ProjectsPanel";
@@ -18,6 +19,7 @@ export const StudioHostPanels = memo(function StudioHostPanels({
   return (
     <>
       <DesktopTimelineTools {...timeline} />
+      <DesktopUpdateBridge host={host} />
       <Dock.Panel id="projects">
         <ProjectsPanel host={host} />
       </Dock.Panel>

@@ -1,0 +1,18 @@
+{
+  "title": "Glintmotion se met à jour tout seul",
+  "summary": "Les mises à jour se téléchargent en arrière-plan. Glintmotion redémarre quand tu fais une pause et rouvre ton projet exactement où tu en étais : composition, tête de lecture, sélection, panneaux et conversation avec l'agent.",
+  "improved": [
+    "Mise à jour automatique, sans jamais couper un rendu, un export, la lecture ou l'agent en plein travail",
+    "Après une mise à jour, cette fenêtre montre ce qui a changé ; elle reste dans le menu Aide",
+    "La conversation avec l'agent et le message en cours d'écriture survivent à un redémarrage",
+    "La colonne Projets se replie depuis son propre onglet, et revient avec ⌘B",
+    "« Vérifier le mouvement » repère les animations qui démarrent en retard, calent ou saccadent",
+    "Touche D : trace un passage sur la timeline pour en parler à l'agent"
+  ],
+  "fixed": [
+    "Un fromTo garde ses valeurs de départ quand une image tombe juste après son début",
+    "La première image affichée correspond bien au temps demandé",
+    "Les vidéos étalonnées n'ont plus de bruit de couleur à l'export, et le ProRes est marqué BT.709",
+    "Couper une vidéo dans un conteneur sans timing coupe la vidéo, pas le conteneur"
+  ]
+}

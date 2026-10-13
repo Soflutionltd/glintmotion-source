@@ -52,6 +52,31 @@ cliButton.addEventListener("click", async () => {
 
 api.cli.status().then(showCli);
 
+const skillsButton = document.getElementById("skills-install");
+
+function showSkills(status, backups = []) {
+  const partial = status.missing < status.skills * status.targets.length;
+  skillsButton.textContent = status.installed ? "À jour" : partial ? "Mettre à jour" : "Installer";
+  skillsButton.disabled = status.installed;
+  if (!status.installed) return;
+  const saved = backups.length ? ` Anciennes versions : ${backups.join(", ")}.` : "";
+  document.getElementById("skills-help").textContent =
+    `${status.skills} compétences installées dans ${status.targets.join(" et ")}. ` +
+    `Les agents les chargent à leur prochaine session.${saved}`;
+}
+
+skillsButton.addEventListener("click", async () => {
+  try {
+    const result = await api.skills.install();
+    showSkills(result, result.backups);
+    showToast("Compétences installées");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+api.skills.status().then(showSkills);
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     await api.mcp.copy(snippets[button.dataset.copy]);

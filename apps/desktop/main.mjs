@@ -20,6 +20,7 @@ import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { probeMotion } from "./motion-probe.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
+import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ const engineEntry = app.isPackaged
 const cliBinDir = app.isPackaged ? join(process.resourcesPath, "bin") : join(here, "bin");
 const skillsDir = app.isPackaged ? join(process.resourcesPath, "skills") : join(here, "..", "..", "skills");
 const CLI_LINK = join(homedir(), ".local", "bin", "glintmotion");
+const SKILL_TARGETS = [join(homedir(), ".claude", "skills"), join(homedir(), ".cursor", "skills")];
 
 // Finder launches apps with a minimal PATH. Homebrew's ffmpeg comes first (libx264);
 // the bundled LGPL one covers Macs without it.
@@ -569,6 +571,10 @@ function installCli() {
 
 ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());
+ipcMain.handle("skills:status", () => skillsStatus(skillsDir, SKILL_TARGETS));
+ipcMain.handle("skills:install", () =>
+  installSkills(skillsDir, SKILL_TARGETS, new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")),
+);
 ipcMain.handle("mcp:info", () => mcp);
 ipcMain.handle("mcp:copy", (_event, value) => clipboard.writeText(String(value)));
 ipcMain.handle("mcp:open", () => openConnectWindow());

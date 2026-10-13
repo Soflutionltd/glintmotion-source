@@ -25,7 +25,7 @@
     },
     "packages/aws-lambda": {
       "name": "@hyperframes/aws-lambda",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1146.0",
         "@aws-sdk/client-sfn": "^3.1146.0",
@@ -58,7 +58,7 @@
     },
     "packages/cli": {
       "name": "@hyperframes/cli",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "bin": {
         "hyperframes": "./bin/hyperframes.mjs",
         "hyperframes-localize-fonts": "./bin/hyperframes-localize-fonts.mjs",
@@ -111,7 +111,7 @@
     },
     "packages/core": {
       "name": "@hyperframes/core",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@chenglou/pretext": "^0.0.5",
         "@hyperframes/lint": "workspace:*",
@@ -157,7 +157,7 @@
     },
     "packages/engine": {
       "name": "@hyperframes/engine",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hono/node-server": "^2.0.5",
         "@hyperframes/core": "workspace:^",
@@ -176,7 +176,7 @@
     },
     "packages/gcp-cloud-run": {
       "name": "@hyperframes/gcp-cloud-run",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@google-cloud/storage": "^7.14.0",
         "@google-cloud/workflows": "^4.2.0",
@@ -197,7 +197,7 @@
     },
     "packages/inspector": {
       "name": "@hyperframes/inspector",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hyperframes/core": "workspace:*",
         "@hyperframes/parsers": "workspace:*",
@@ -216,7 +216,7 @@
     },
     "packages/lint": {
       "name": "@hyperframes/lint",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hyperframes/parsers": "workspace:*",
         "acorn": "^8.17.0",
@@ -236,7 +236,7 @@
     },
     "packages/parsers": {
       "name": "@hyperframes/parsers",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@babel/parser": "^7.27.0",
         "acorn": "^8.17.0",
@@ -257,7 +257,7 @@
     },
     "packages/player": {
       "name": "@hyperframes/player",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hyperframes/core": "workspace:*",
       },
@@ -272,7 +272,7 @@
     },
     "packages/producer": {
       "name": "@hyperframes/producer",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hono/node-server": "^2.0.5",
         "@hyperframes/core": "workspace:*",
@@ -298,7 +298,7 @@
     },
     "packages/sdk": {
       "name": "@hyperframes/sdk",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hyperframes/core": "workspace:*",
         "@hyperframes/parsers": "workspace:*",
@@ -328,7 +328,7 @@
     },
     "packages/shader-transitions": {
       "name": "@hyperframes/shader-transitions",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "html2canvas": "^1.4.1",
       },
@@ -340,7 +340,7 @@
     },
     "packages/studio": {
       "name": "@hyperframes/studio",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@base-ui/react": "1.7.0",
         "@codemirror/autocomplete": "^6.20.1",
@@ -394,7 +394,7 @@
     },
     "packages/studio-server": {
       "name": "@hyperframes/studio-server",
-      "version": "0.8.150",
+      "version": "0.8.152",
       "dependencies": {
         "@hyperframes/core": "workspace:*",
         "@hyperframes/parsers": "workspace:*",

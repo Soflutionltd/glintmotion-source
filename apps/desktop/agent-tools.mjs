@@ -171,6 +171,11 @@ export const AGENT_TOOLS = [
       properties: {
         strict: { type: "boolean", description: "Also fail on warnings." },
         at: { type: "array", items: { type: "number", minimum: 0 }, description: "Extra times to sample (s)." },
+        fix: {
+          type: "boolean",
+          description:
+            "First rewrite the project files to apply the findings marked fixable (eases that freeze text, text scale origin, will-change on scaled text). Call inside a glintmotion_session so it can be undone.",
+        },
       },
     },
   },
@@ -359,7 +364,7 @@ export const MCP_INSTRUCTIONS = [
   "2. glintmotion_session begin with a label, so the person can undo your whole turn in one step.",
   "3. Look: studio_look for the structure, glintmotion_contact_sheet for the whole video, studio_frame for one instant.",
   "4. Edit with the studio_* tools (timeline, text, style, animation) or by editing the project files; the studio reloads.",
-  "5. Verify: glintmotion_check, glintmotion_motion_check when text moves, then a contact sheet. Fix what they show before going on.",
+  "5. Verify: glintmotion_check (fix: true applies the findings marked fixable), glintmotion_motion_check when text moves, then a contact sheet. Fix what they show before going on.",
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
   "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
@@ -450,10 +455,11 @@ export function createAgentTools(app) {
     return run.code === 0 ? reply : { ...reply, isError: true };
   }
 
-  async function check({ strict, at }) {
+  async function check({ strict, at, fix }) {
     const dir = app.projectDir();
     const args = ["check", dir, "--json"];
     if (strict) args.push("--strict");
+    if (fix) args.push("--fix");
     if (Array.isArray(at) && at.length) args.push("--at", at.map(Number).filter(Number.isFinite).join(","));
     const run = await runCaptured(args, dir, 300);
     const report = parseJson(run.stdout);

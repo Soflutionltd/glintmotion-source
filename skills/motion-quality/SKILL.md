@@ -98,7 +98,7 @@ When `early_finish` reports `visibleUntil`, that is when the viewer sees the mov
 ## Workflow
 
 1. Write the motion with the rules above.
-2. `glintmotion_check`: fix the three lint warnings first, they are cheap.
+2. `glintmotion_check` with `fix: true` (or `hyperframes lint --fix`) inside a session: it rewrites the literal cases of the three lint warnings. Fix the rest (eases held in variables, an origin someone chose) by hand.
 3. `glintmotion_motion_check` on the scenes with text in motion.
 4. Fix, then run it again on the same `from`/`to` until it returns no findings, or only ones you chose (a deliberate hold, a late start on purpose).
 

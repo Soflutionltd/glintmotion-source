@@ -34,6 +34,8 @@ const OUTPUT_TAIL = 30_000;
 const RENDER_WAIT_S = 50;
 const MAX_WAIT_S = 600;
 const MAX_SHEET_FRAMES = 24;
+const MOTION_TWEENS = 120;
+const MAX_MOTION_TWEENS = 400;
 const FRAME_FETCH_PARALLEL = 3;
 const MEDIA_VIEWS = ["probe", "loudness", "waveform", "filmstrip"];
 const SESSION_ACTIONS = ["begin", "end", "undo", "changes", "list", "show"];
@@ -169,6 +171,25 @@ export const AGENT_TOOLS = [
       properties: {
         strict: { type: "boolean", description: "Also fail on warnings." },
         at: { type: "array", items: { type: "number", minimum: 0 }, description: "Extra times to sample (s)." },
+      },
+    },
+  },
+  {
+    name: "glintmotion_motion_check",
+    description: [
+      "Watch every moving element frame by frame, the way the render will draw it, and report motion that",
+      "reads badly: stall (stops then moves again), tail_tick (settles, jumps one more pixel, stops),",
+      "early_finish / late_start (a third or more of the tween shows no movement), judder (text that shakes",
+      "while it scales or moves). Each finding gives the target, its tween's times, the per-frame pattern",
+      "(m = moved, = same pixels) and a fix. Each element is measured alone, so grain and video do not hide",
+      "anything. Run it after glintmotion_check when the video has text in motion. About 0.3 s per tween.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "number", minimum: 0, description: "Only tweens running after this time (s)." },
+        to: { type: "number", minimum: 0, description: "Only tweens starting before this time (s)." },
+        max_tweens: { type: "integer", minimum: 1, maximum: MAX_MOTION_TWEENS, default: MOTION_TWEENS },
       },
     },
   },
@@ -338,7 +359,7 @@ export const MCP_INSTRUCTIONS = [
   "2. glintmotion_session begin with a label, so the person can undo your whole turn in one step.",
   "3. Look: studio_look for the structure, glintmotion_contact_sheet for the whole video, studio_frame for one instant.",
   "4. Edit with the studio_* tools (timeline, text, style, animation) or by editing the project files; the studio reloads.",
-  "5. Verify: glintmotion_check, then a contact sheet. Fix what they show before going on.",
+  "5. Verify: glintmotion_check, glintmotion_motion_check when text moves, then a contact sheet. Fix what they show before going on.",
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
   "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
@@ -353,6 +374,7 @@ export const MCP_INSTRUCTIONS = [
  *   runEngine: (args: string[], cwd: string) => import("node:child_process").ChildProcess,
  *   studioCall: (name: string, args: object) => Promise<any>,
  *   studioUrl: () => string | null,
+ *   motionProbe: (request: { from?: number, to?: number, maxTweens: number }) => Promise<object>,
  *   generateMusic: (request: { prompt: string, seconds: number }) => Promise<string>,
  *   deliver: (request: { filename: string, preset: string, color: string }) => Promise<string>,
  *   createProject: (request: { name: string, parent: string, resolution: string }) => Promise<string>,
@@ -435,6 +457,15 @@ export function createAgentTools(app) {
     const run = await runCaptured(args, dir, 300);
     const report = parseJson(run.stdout);
     if (!report) return failure(`check produced no report (code ${run.code}). ${tail(run.stderr, 1500)}`);
+    return text(report);
+  }
+
+  async function motionCheck({ from, to, max_tweens }) {
+    const report = await app.motionProbe({
+      from: clampNumber(from, 0, Number.MAX_SAFE_INTEGER, 0),
+      to: clampNumber(to, 0, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+      maxTweens: clampNumber(max_tweens, 1, MAX_MOTION_TWEENS, MOTION_TWEENS),
+    });
     return text(report);
   }
 
@@ -687,6 +718,7 @@ export function createAgentTools(app) {
     glintmotion_create_project: createProject,
     glintmotion_session: session,
     glintmotion_check: check,
+    glintmotion_motion_check: motionCheck,
     glintmotion_contact_sheet: contactSheet,
     glintmotion_inspect_media: inspectMedia,
     glintmotion_generate_music: music,

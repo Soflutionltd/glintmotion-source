@@ -18,6 +18,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
+import { probeMotion } from "./motion-probe.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 
@@ -467,6 +468,21 @@ function startAgent({ prompt, model }) {
 
 const renders = createRenderJobs({ runEngine });
 
+let motionRun = null;
+async function checkMotion(request) {
+  if (!studio?.url) throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
+  if (motionRun) throw new Error("A motion check is already running. Wait for it to finish.");
+  const info = projectInfo(studio.dir, null);
+  if (!info.width || !info.height) throw new Error("index.html has no data-width/data-height on its root.");
+  const url = new URL(`/api/projects/${encodeURIComponent(basename(studio.dir))}/preview?hf-capture=1`, studio.url);
+  motionRun = probeMotion({ url: url.href, width: info.width, height: info.height, ...request });
+  try {
+    return await motionRun;
+  } finally {
+    motionRun = null;
+  }
+}
+
 function startMcp() {
   const token = loadMcpToken(join(app.getPath("userData"), "mcp-token"));
   const agentProjectDir = () => {
@@ -486,6 +502,7 @@ function startMcp() {
       projectInfo: () => (studio ? projectInfo(studio.dir, null) : null),
       runEngine,
       renders,
+      motionProbe: checkMotion,
       generateMusic: composeMusic,
       deliver: (request) => deliverRender({ projectDir: agentProjectDir(), ...request }),
       createProject,

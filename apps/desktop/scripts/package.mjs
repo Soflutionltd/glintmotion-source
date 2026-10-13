@@ -56,6 +56,7 @@ const [appPath] = await packager({
     /^\/bin($|\/)/,
     /^\/vendor($|\/)/,
     /^\/package-lock\.json$/,
+    /\.test\.mjs$/,
   ],
   asar: true,
   osxSign: {

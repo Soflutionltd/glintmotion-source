@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-icon.mjs",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.1.1",

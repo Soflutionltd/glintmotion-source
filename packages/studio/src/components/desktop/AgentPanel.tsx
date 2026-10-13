@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, DownloadSimple, NotePencil, SignIn, Square, Wrench } from "@phosphor-icons/react";
 import type {
   AgentEvent,
@@ -10,6 +10,7 @@ import { hostErrorMessage } from "../../utils/desktopHost";
 import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
 import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
 import { AgentPendingStretches } from "./AgentPendingStretches";
+import { usePersistedAgentChat, useStudioProjectId } from "./usePersistedAgentChat";
 import {
   agentStretchPrompt,
   clearAgentStretches,
@@ -48,20 +49,23 @@ function composerLabels(stretchCount: number) {
 }
 
 export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost }) {
-  const [items, setItems] = useState<ChatItem[]>([]);
-  const [draft, setDraft] = useState("");
+  const projectId = useStudioProjectId();
+  const { items, setItems, draft, setDraft } = usePersistedAgentChat<ChatItem>(projectId);
   const [busy, setBusy] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("opus");
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [pending, setPending] = useState<ClaudeAccountAction | null>(null);
   const stretches = useAgentStretchStore((s) => s.stretches);
-  const nextId = useRef(0);
+  const nextId = useRef(items.reduce((next, item) => Math.max(next, item.id + 1), 0));
   const listRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
-  const push = (item: NewChatItem) =>
-    setItems((prev) => [...prev, { ...item, id: nextId.current++ } as ChatItem]);
+  const push = useCallback(
+    (item: NewChatItem) =>
+      setItems((prev) => [...prev, { ...item, id: nextId.current++ } as ChatItem]),
+    [setItems],
+  );
 
   useEffect(() => {
     host.agent
@@ -81,7 +85,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
         });
       }
     });
-  }, [host]);
+  }, [host, push]);
 
   useEffect(() => {
     const refresh = () => {

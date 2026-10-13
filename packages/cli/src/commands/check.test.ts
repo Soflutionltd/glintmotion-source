@@ -530,6 +530,38 @@ it("threads --no-proxy into the browser check options", async () => {
   expect(runPipeline).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ autoProxy: false }));
 });
 
+it("applies lint fixes before the pipeline only with --fix and reports them", async () => {
+  const { report } = await runScenario(fakeDriver());
+  const order: string[] = [];
+  const fixed = [
+    {
+      file: "index.html",
+      code: "gsap_ease_freezes_on_frame_clock",
+      description: "ease",
+      applied: true,
+    },
+  ];
+  const fixLint = vi.fn(async () => (order.push("fix"), fixed));
+  const runPipeline = vi.fn(async () => (order.push("pipeline"), report));
+  const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const command = createCheckCommand({
+    resolveProject: () => PROJECT,
+    runPipeline,
+    withMeta: (value) => value,
+    fixLint,
+  });
+
+  await runCommand(command, { rawArgs: ["--json"] });
+  expect(fixLint).not.toHaveBeenCalled();
+  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).not.toHaveProperty("fixed");
+
+  log.mockClear();
+  await runCommand(command, { rawArgs: ["--json", "--fix"] });
+  expect(fixLint).toHaveBeenCalledWith(PROJECT.dir);
+  expect(order).toEqual(["pipeline", "fix", "pipeline"]);
+  expect(JSON.parse(String(log.mock.calls[0]?.[0])).fixed).toEqual(fixed);
+});
+
 it("rejects malformed caption-zone specs instead of silently disabling the gate", async () => {
   const { report } = await runScenario(fakeDriver());
   const runPipeline = vi.fn(async () => report);

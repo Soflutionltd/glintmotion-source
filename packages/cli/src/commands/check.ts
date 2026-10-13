@@ -21,24 +21,28 @@ import {
 } from "../utils/checkPipeline.js";
 import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../utils/checkTypes.js";
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
+import { fixProjectLint, printFixes, type LintFixReport } from "../utils/lintFix.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
   ["Output one agent-readable envelope", "hyperframes check --json"],
   ["Persist the five audited contrast frames", "hyperframes check --snapshots"],
   ["Also fail on warnings", "hyperframes check --strict"],
+  ["Apply the safe automatic lint fixes first", "hyperframes check --fix"],
 ];
 
 export interface CheckCommandDependencies {
   resolveProject(dir: string | undefined): ProjectDir;
   runPipeline(project: ProjectDir, options: CheckOptions): Promise<CheckReport>;
   withMeta(value: object): object;
+  fixLint?(projectDir: string): Promise<LintFixReport[]>;
 }
 
 const DEFAULT_COMMAND_DEPENDENCIES: CheckCommandDependencies = {
   resolveProject,
   runPipeline: runCheckPipeline,
   withMeta,
+  fixLint: fixProjectLint,
 };
 
 const CHECK_COMMAND_ARGS = {
@@ -95,6 +99,11 @@ const CHECK_COMMAND_ARGS = {
     description: "Exit non-zero on warnings too",
     default: false,
   },
+  fix: {
+    type: "boolean",
+    description: "Rewrite the files to apply the lint fixes marked fixable before checking",
+    default: false,
+  },
   proxy: {
     type: "boolean",
     description:
@@ -148,9 +157,12 @@ export function createCheckCommand(
         if (!asJson) {
           console.log(`${c.accent("◆")}  Checking ${c.accent(project.name)}`);
         }
+        const fixed =
+          args.fix === true ? await fixFirst(dependencies, project.dir, asJson) : undefined;
         const report = await dependencies.runPipeline(project, options);
         if (asJson) {
-          console.log(JSON.stringify(dependencies.withMeta(report), null, 2));
+          const envelope = fixed ? { ...report, fixed } : report;
+          console.log(JSON.stringify(dependencies.withMeta(envelope), null, 2));
         } else {
           printHumanReport(report);
         }
@@ -168,6 +180,19 @@ export function createCheckCommand(
       }
     },
   });
+}
+
+async function fixFirst(
+  dependencies: CheckCommandDependencies,
+  projectDir: string,
+  asJson: boolean,
+): Promise<LintFixReport[]> {
+  const fixed = await (dependencies.fixLint ?? fixProjectLint)(projectDir);
+  if (!asJson) {
+    console.log();
+    printFixes(fixed);
+  }
+  return fixed;
 }
 
 function parseCheckOptions(args: Record<string, unknown>): CheckOptions {

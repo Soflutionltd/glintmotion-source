@@ -8,9 +8,11 @@ export const examples: Example[] = [
   ["Lint a specific directory", "hyperframes lint ./my-video"],
   ["Output findings as JSON", "hyperframes lint --json"],
   ["Include info-level findings", "hyperframes lint --verbose"],
+  ["Apply the safe automatic fixes, then lint", "hyperframes lint --fix"],
 ];
 import { formatLintFindings } from "../utils/lintFormat.js";
 import { lintProject } from "../utils/lintProject.js";
+import { fixProjectLint, printFixes, withoutFixEdits } from "../utils/lintFix.js";
 import { resolveProject } from "../utils/project.js";
 import { trackLintRun } from "../telemetry/lintRun.js";
 import { getRunId } from "../telemetry/runId.js";
@@ -37,6 +39,11 @@ export default defineCommand({
       description: "Show info-level findings (hidden by default)",
       default: false,
     },
+    fix: {
+      type: "boolean",
+      description: "Rewrite the files to apply the fixes marked fixable, then lint again",
+      default: false,
+    },
   },
   async run({ args }) {
     // Set process.exitCode + return instead of process.exit(): process.exit()
@@ -47,6 +54,7 @@ export default defineCommand({
     // (publish/transcribe/upgrade/play/present) already use.
     try {
       const project = resolveProject(args.dir);
+      const fixed = args.fix ? await fixProjectLint(project.dir) : undefined;
       const startedAt = Date.now();
       const lintResult = await lintProject(project.dir);
       trackLintRun(project.dir, lintResult, {
@@ -62,8 +70,11 @@ export default defineCommand({
           errorCount: lintResult.totalErrors,
           warningCount: lintResult.totalWarnings,
           infoCount: lintResult.totalInfos,
-          findings: args.verbose ? allFindings : allFindings.filter((f) => f.severity !== "info"),
+          findings: withoutFixEdits(
+            args.verbose ? allFindings : allFindings.filter((f) => f.severity !== "info"),
+          ),
           filesScanned: lintResult.results.length,
+          ...(fixed ? { fixed } : {}),
         };
         console.log(JSON.stringify(withMeta(combined), null, 2));
         setCommandExitCode(combined.ok ? 0 : 1);
@@ -75,6 +86,7 @@ export default defineCommand({
         fileCount === 1 ? (lintResult.results[0]?.file ?? "index.html") : `${fileCount} files`;
       console.log(`${c.accent("◆")}  Linting ${c.accent(`${project.name}/${fileLabel}`)}`);
       console.log();
+      if (fixed) printFixes(fixed);
 
       if (lintResult.totalErrors === 0 && lintResult.totalWarnings === 0) {
         console.log(`${c.success("◇")}  ${c.success("0 errors, 0 warnings")}`);

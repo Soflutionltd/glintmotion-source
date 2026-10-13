@@ -495,6 +495,10 @@
       // only gained two optional pass-through parameters here, but the line
       // shift makes fallow re-flag the pre-existing clone.
       "packages/studio/src/hooks/useGsapSelectionHandlers.ts",
+      // check.ts: its sampling flags (samples, at, at-transitions, max-transition-samples,
+      // max-issues) mirror layout.ts on purpose, since check runs the same layout audit and
+      // each citty command owns its ArgsDef. Pre-existing; adding --fix re-flags the clone.
+      "packages/cli/src/commands/check.ts",
       // gsapParser.ts: recast/babel GSAP writer — intentional duplication between
       // recast and acorn parallel implementations (pre-existing, moved from core).
       "packages/parsers/src/gsapParser.ts",

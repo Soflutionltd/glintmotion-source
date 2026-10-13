@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
@@ -34,6 +34,19 @@ for (const entry of readdirSync(modules, { recursive: true })) {
   if (pruned.test(entry)) rmSync(join(modules, entry), { force: true });
 }
 
+// The engine's pinned chrome-headless-shell ships inside the app, so the first export
+// does not download 190 MB. Only the managed cache build is accepted: a system Chrome
+// or another tool's puppeteer download would render with an untested version.
+const engineCli = join(modules, "@hyperframes", "cli", "bin", "hyperframes.mjs");
+const browserEnv = { ...process.env, HYPERFRAMES_NO_TELEMETRY: "1", NO_COLOR: "1", HYPERFRAMES_BROWSER_PATH: "", PRODUCER_HEADLESS_SHELL_PATH: "" };
+const ensured = execFileSync(process.execPath, [engineCli, "browser", "ensure"], { env: browserEnv, encoding: "utf8" });
+const chromeBinary = ensured.match(/Path:\s+(\S.*?)\s*$/m)?.[1];
+if (!chromeBinary?.includes(join(".cache", "hyperframes", "chrome", "chrome-headless-shell"))) {
+  throw new Error(`Expected the engine's managed chrome-headless-shell, got ${chromeBinary}`);
+}
+const chromeDir = join(stageDir, "chrome-headless-shell");
+cpSync(dirname(chromeBinary), chromeDir, { recursive: true, verbatimSymlinks: true });
+
 const ffmpegDir = join(appDir, "vendor", "ffmpeg");
 const bundledFfmpeg = ["ffmpeg", "ffprobe"].every((tool) => existsSync(join(ffmpegDir, tool)));
 if (!bundledFfmpeg) console.warn("No vendor/ffmpeg build (scripts/build-ffmpeg.sh): the app will use Homebrew's ffmpeg.");
@@ -47,7 +60,7 @@ const [appPath] = await packager({
   icon: join(appDir, "build/icon.icns"),
   appBundleId: "com.soflution.glintmotion",
   appCategoryType: "public.app-category.video",
-  extraResource: [engineDir, join(appDir, "bin"), join(appDir, "..", "..", "skills"), ...(bundledFfmpeg ? [ffmpegDir] : [])],
+  extraResource: [engineDir, join(appDir, "bin"), join(appDir, "..", "..", "skills"), chromeDir, ...(bundledFfmpeg ? [ffmpegDir] : [])],
   ignore: [
     /^\/stage($|\/)/,
     /^\/out($|\/)/,

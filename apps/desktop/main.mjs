@@ -41,6 +41,10 @@ const SKILL_TARGETS = [join(homedir(), ".claude", "skills"), join(homedir(), ".c
 
 // Finder launches apps with a minimal PATH. Homebrew's ffmpeg comes first (libx264);
 // the bundled LGPL one covers Macs without it.
+const bundledChrome = app.isPackaged
+  ? join(process.resourcesPath, "chrome-headless-shell", "chrome-headless-shell")
+  : null;
+
 const engineEnv = {
   ...process.env,
   PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH ?? "/usr/bin:/bin", BUNDLED_FFMPEG_DIR].join(":"),
@@ -52,6 +56,10 @@ const engineEnv = {
   DO_NOT_TRACK: "1",
   NO_COLOR: "1",
 };
+// A browser the person chose stays theirs; otherwise the build shipped with the app.
+if (bundledChrome && existsSync(bundledChrome) && !engineEnv.HYPERFRAMES_BROWSER_PATH && !engineEnv.PRODUCER_HEADLESS_SHELL_PATH) {
+  engineEnv.HYPERFRAMES_BROWSER_PATH = bundledChrome;
+}
 
 const STUDIO_CSS = `
 [data-testid="header-open-in-desktop"],

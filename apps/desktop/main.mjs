@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell } from "electron";
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -232,11 +233,36 @@ const AGENT_SYSTEM_PROMPT = [
   `Before animating text, read ${join(skillsDir, "motion-quality", "SKILL.md")}: moderate eases for text moving on y, scale text from its baseline, no will-change on scaled text.`,
   "`glintmotion check` reports them as gsap_ease_freezes_on_frame_clock, gsap_text_scale_center_origin and will_change_scaled_text: fix those warnings.",
   "Do not render: the person exports from the studio.",
+  "Glintmotion's own tools are there as MCP tools (mcp__glintmotion__*): studio_look and studio_inspect to find elements, the other studio_* tools to edit them live,",
+  "glintmotion_contact_sheet to see the whole video, glintmotion_motion_check after animating text,",
+  "and glintmotion_session begin/end around your changes so the person can undo them in one step.",
 ].join(" ");
 const AGENT_ALLOWED_TOOLS = [
   "Bash(npm run check)",
+  "mcp__glintmotion__*",
   ...CLI_COMMANDS.flatMap((command) => [`Bash(glintmotion ${command})`, `Bash(glintmotion ${command} *)`]),
 ];
+
+// Switching project would kill the agent; exporting, publishing and paid music stay with the person.
+const AGENT_BLOCKED_TOOLS = [
+  "glintmotion_open_project",
+  "glintmotion_create_project",
+  "glintmotion_render",
+  "glintmotion_render_cancel",
+  "glintmotion_deliver",
+  "glintmotion_upload",
+  "glintmotion_generate_music",
+].map((name) => `mcp__glintmotion__${name}`);
+
+/** The token goes in a private file rather than argv, where `ps` would show it. */
+function agentMcpArgs() {
+  if (!mcp || mcp.error) return [];
+  const file = join(app.getPath("userData"), "agent-mcp.json");
+  const server = { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } };
+  writeFileSync(file, JSON.stringify({ mcpServers: { glintmotion: server } }), { mode: 0o600 });
+  chmodSync(file, 0o600);
+  return ["--mcp-config", file, "--strict-mcp-config", "--disallowedTools", ...AGENT_BLOCKED_TOOLS];
+}
 
 /** @type {{ child: import("node:child_process").ChildProcess, dir: string } | null} */
 let agentRun = null;
@@ -402,7 +428,11 @@ function forwardAgentLine(line, dir) {
       if (block.type === "tool_use") {
         const input = block.input ?? {};
         const target = input.file_path ?? input.path ?? input.pattern ?? input.command ?? "";
-        sendAgentEvent({ kind: "tool", name: block.name, target: String(target).replace(`${dir}/`, "") });
+        sendAgentEvent({
+          kind: "tool",
+          name: block.name.replace(/^mcp__glintmotion__/, ""),
+          target: String(target).replace(`${dir}/`, ""),
+        });
       }
     }
   } else if (message.type === "result") {
@@ -432,6 +462,7 @@ function startAgent({ prompt, model }) {
     "--verbose",
     "--model",
     model,
+    ...agentMcpArgs(),
     "--permission-mode",
     "acceptEdits",
     "--allowedTools",

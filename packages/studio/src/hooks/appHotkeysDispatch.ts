@@ -10,6 +10,7 @@ import { canSplitElement } from "../utils/timelineElementSplit";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import { STUDIO_PLAIN_KEYS } from "../player/components/studioShortcuts";
 import { openAudioGainDialog } from "../player/components/audioGainDialogStore";
+import { setStretchDrawing, useAgentStretchStore } from "../player/store/agentStretchStore";
 import type { LinkShortcutCallbacks } from "./linkShortcuts";
 
 // Extracted from useAppHotkeys.ts to keep it under the studio 600-line cap,
@@ -52,6 +53,21 @@ export interface HotkeyCallbacks extends LinkShortcutCallbacks {
   domEditSelectionRef: React.MutableRefObject<DomEditSelection | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
   readOnlyPreview: boolean;
+}
+
+/** D draws a stretch for the agent, where the Agent panel exists; Escape leaves drawing. */
+function handleStretchDrawKey(event: KeyboardEvent, key: string): boolean {
+  const { drawing } = useAgentStretchStore.getState();
+  if (event.key === "Escape" && drawing) {
+    event.preventDefault();
+    setStretchDrawing(false);
+    return true;
+  }
+  if (key !== "d" || event.shiftKey || event.altKey) return false;
+  if (!useDockLayoutStore.getState().panels.includes("agent")) return false;
+  event.preventDefault();
+  setStretchDrawing(!drawing);
+  return true;
 }
 
 function timelineOwnsKey(event: KeyboardEvent): boolean {
@@ -206,6 +222,8 @@ export function dispatchPlainKey(event: KeyboardEvent, key: string, cb: HotkeyCa
       return;
     }
   }
+
+  if (handleStretchDrawKey(event, key)) return;
 
   if (key === "b" && !event.shiftKey && !event.altKey) {
     event.preventDefault();

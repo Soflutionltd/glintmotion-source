@@ -6,6 +6,7 @@ import { RULER_H, CLIP_Y, TRACK_H, PLAYHEAD_HEAD_W, getTimelineRowHeight } from 
 import { getTimelinePlayheadTransform } from "./timelinePlayheadTransform";
 import { TimelineLanes } from "./TimelineLanes";
 import { TimelineGestureOverlay } from "./TimelineGestureOverlay";
+import { TimelineStretchDrawLayer } from "./TimelineStretchDrawLayer";
 import { useTimelineContext } from "./TimelineProvider";
 
 // A dropped clip's length is unknown until it lands; the preview shows a default.
@@ -265,6 +266,14 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
           }}
         />
       )}
+
+      <TimelineStretchDrawLayer
+        pps={props.pps}
+        contentOrigin={props.contentOrigin}
+        trackContentWidth={props.trackContentWidth}
+        totalH={props.totalH}
+        effectiveDuration={props.effectiveDuration}
+      />
 
       {/* Playhead — hidden while dragging a beat so its guideline doesn't
           track the scrub and clutter the beat being moved. Explicit width +

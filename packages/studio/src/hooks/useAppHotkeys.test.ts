@@ -7,6 +7,8 @@ import { clearAutomationClipboard, copyRange } from "../player/components/automa
 import { VOLUME_RANGE } from "@hyperframes/core/audio-automation";
 import type { TimelineElement } from "../player/store/timelineElement";
 import { useAudioGainDialogStore } from "../player/components/audioGainDialogStore";
+import { useDockLayoutStore } from "../components/dock/dockLayoutStore";
+import { clearAgentStretches, useAgentStretchStore } from "../player/store/agentStretchStore";
 
 /** Minimal valid fixture — TimelineElement only requires these five fields. */
 const bgmElement: TimelineElement = {
@@ -506,5 +508,36 @@ describe("dispatchPlainKey — G opens Audio Gain", () => {
     dispatchPlainKey(event, "g", callbacks());
     expect(useAudioGainDialogStore.getState().targetKeys).toBeNull();
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe("dispatchPlainKey — stretch drawing for the agent", () => {
+  const panels = useDockLayoutStore.getState().panels;
+  afterEach(() => {
+    useDockLayoutStore.setState({ panels });
+    clearAgentStretches();
+  });
+
+  it("toggles drawing with D where the Agent panel exists, and Escape leaves it", () => {
+    useDockLayoutStore.setState({ panels: [...panels, "agent"] });
+    const first = press("d");
+    dispatchPlainKey(first, "d", callbacks());
+    expect(first.defaultPrevented).toBe(true);
+    expect(useAgentStretchStore.getState().drawing).toBe(true);
+
+    dispatchPlainKey(press("Escape"), "escape", callbacks());
+    expect(useAgentStretchStore.getState().drawing).toBe(false);
+
+    dispatchPlainKey(press("d"), "d", callbacks());
+    dispatchPlainKey(press("d"), "d", callbacks());
+    expect(useAgentStretchStore.getState().drawing).toBe(false);
+  });
+
+  it("leaves D alone in the web Studio, which has no Agent panel", () => {
+    useDockLayoutStore.setState({ panels: panels.filter((id) => id !== "agent") });
+    const event = press("d");
+    dispatchPlainKey(event, "d", callbacks());
+    expect(event.defaultPrevented).toBe(false);
+    expect(useAgentStretchStore.getState().drawing).toBe(false);
   });
 });

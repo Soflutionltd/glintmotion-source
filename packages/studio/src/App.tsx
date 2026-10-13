@@ -52,7 +52,7 @@ import { useGestureTrailOverlay } from "./hooks/useGestureTrailOverlay";
 import { EditorShell } from "./components/EditorShell";
 import { useStudioSidePanels } from "./hooks/useStudioSidePanels";
 import { desktopHostHandlers } from "./components/desktop/DesktopTimelineTools";
-import { MotionCheckButton } from "./components/desktop/MotionCheckButton";
+import { DesktopTimelineActions } from "./components/desktop/DesktopTimelineActions";
 import { TimelineToolbar } from "./components/TimelineToolbar";
 import { StudioPlaybackProvider, StudioShellProvider } from "./contexts/StudioContext";
 import { PanelLayoutProvider } from "./contexts/PanelLayoutContext";
@@ -453,7 +453,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
       <TimelineToolbar
         domEditSession={toolbarSession}
         onSplitElement={timelineEditing.handleTimelineElementSplit}
-        rightActions={<MotionCheckButton />}
+        rightActions={<DesktopTimelineActions />}
       />
     ),
     [toolbarSession, timelineEditing.handleTimelineElementSplit],

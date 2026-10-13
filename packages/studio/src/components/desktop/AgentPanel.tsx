@@ -9,6 +9,12 @@ import type {
 import { hostErrorMessage } from "../../utils/desktopHost";
 import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
 import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
+import { AgentPendingStretches } from "./AgentPendingStretches";
+import {
+  agentStretchPrompt,
+  clearAgentStretches,
+  useAgentStretchStore,
+} from "../../player/store/agentStretchStore";
 
 type ChatItem =
   | { id: number; role: "user"; text: string }
@@ -32,6 +38,15 @@ function describeDone(event: Extract<AgentEvent, { kind: "done" }>): string {
   return parts.length ? `Done · ${parts.join(" · ")}` : "Done.";
 }
 
+function composerLabels(stretchCount: number) {
+  if (stretchCount === 0)
+    return { send: "Send", placeholder: "Ask Claude Code to change the video…" };
+  return {
+    send: `Send ${stretchCount} edit${stretchCount === 1 ? "" : "s"} to Claude Code`,
+    placeholder: "Add a note for all of them (optional)…",
+  };
+}
+
 export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost }) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [draft, setDraft] = useState("");
@@ -40,8 +55,10 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   const [model, setModel] = useState("opus");
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [pending, setPending] = useState<ClaudeAccountAction | null>(null);
+  const stretches = useAgentStretchStore((s) => s.stretches);
   const nextId = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
 
   const push = (item: NewChatItem) =>
     setItems((prev) => [...prev, { ...item, id: nextId.current++ } as ChatItem]);
@@ -101,10 +118,12 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   }, [items]);
 
   const send = () => {
-    const prompt = draft.trim();
-    if (!prompt || busy || !ready) return;
+    const message = draft.trim();
+    if ((!message && stretches.length === 0) || busy || !ready) return;
+    const prompt = agentStretchPrompt(message, stretches);
     push({ role: "user", text: prompt });
     setDraft("");
+    clearAgentStretches();
     setBusy(true);
     host.agent.send({ prompt, model }).catch((reason: unknown) => {
       setBusy(false);
@@ -115,6 +134,8 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
       });
     });
   };
+
+  const labels = composerLabels(stretches.length);
 
   const reset = () => {
     if (busy) return;
@@ -242,7 +263,9 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
           send();
         }}
       >
+        <AgentPendingStretches disabled={busy} onNoteDone={() => messageRef.current?.focus()} />
         <textarea
+          ref={messageRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -252,7 +275,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
             }
           }}
           rows={3}
-          placeholder="Ask Claude Code to change the video…"
+          placeholder={labels.placeholder}
           aria-label="Message to the agent"
           className="w-full resize-none bg-transparent px-1 text-[12px] leading-relaxed text-panel-text-1 outline-none placeholder:text-neutral-500"
         />
@@ -269,8 +292,9 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
           ) : (
             <button
               type="submit"
-              disabled={!draft.trim() || !ready}
-              aria-label="Send"
+              disabled={(!draft.trim() && stretches.length === 0) || !ready}
+              aria-label={labels.send}
+              title={labels.send}
               className="flex h-7 w-7 items-center justify-center rounded-full bg-panel-text-1 text-panel-bg transition-transform hover:scale-105 disabled:opacity-30"
             >
               <ArrowUp size={13} weight="bold" aria-hidden="true" />

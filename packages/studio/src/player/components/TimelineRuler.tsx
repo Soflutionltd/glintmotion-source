@@ -5,6 +5,7 @@ import { RULER_H, getTimelineBeatEntries } from "./timelineLayout";
 import { formatTimelineTickLabel } from "./timelineRulerGeometry";
 import { usePlayerStore } from "../store/playerStore";
 import { useMotionCheckStore } from "../store/motionCheckStore";
+import { useAgentStretchStore } from "../store/agentStretchStore";
 import { secondsToFrame } from "../lib/time";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import type { TimelineTimeRange } from "../lib/timelineClipIndex";
@@ -53,6 +54,28 @@ const MotionFindingBands = memo(function MotionFindingBands({ pps }: { pps: numb
       className="absolute bottom-0 h-[3px] rounded-full bg-amber-500/80"
       style={{ left: finding.start * pps, width: Math.max(2, (finding.end - finding.start) * pps) }}
     />
+  ));
+});
+
+/** The stretches drawn for the agent and not sent yet, numbered as the Agent panel lists them. */
+const AgentStretchBands = memo(function AgentStretchBands({ pps }: { pps: number }) {
+  const stretches = useAgentStretchStore((s) => s.stretches);
+  return stretches.map((stretch, index) => (
+    <div
+      key={stretch.id}
+      data-timeline-agent-stretch={stretch.id}
+      title={stretch.note || "Stretch for the agent"}
+      className="pointer-events-none absolute top-0 border-x border-studio-accent/70 bg-studio-accent/15"
+      style={{
+        left: stretch.start * pps,
+        width: (stretch.end - stretch.start) * pps,
+        height: RULER_H,
+      }}
+    >
+      <span className="absolute top-0.5 left-1 font-mono text-[9px] leading-none text-accent-ink">
+        {index + 1}
+      </span>
+    </div>
   ));
 });
 
@@ -216,6 +239,7 @@ export const TimelineRuler = memo(function TimelineRuler({
               <div className="w-px" style={{ height: RULER_H, background: theme.tickMajor }} />
             </div>
           ))}
+          <AgentStretchBands pps={pps} />
           <MotionFindingBands pps={pps} />
           {scrollRef && (
             <HeaderSlicedLabelMask

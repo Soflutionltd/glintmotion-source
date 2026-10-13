@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
 
 /** Engine commands an agent may run. Rendering has its own job tool; the rest open UIs, accounts or the network. */
@@ -37,6 +37,10 @@ const MAX_SHEET_FRAMES = 24;
 const FRAME_FETCH_PARALLEL = 3;
 const MEDIA_VIEWS = ["probe", "loudness", "waveform", "filmstrip"];
 const SESSION_ACTIONS = ["begin", "end", "undo", "changes", "list", "show"];
+const SHARE_FOLDERS = ["renders", "snapshots"];
+const SIGNED_UPLOAD_PATH = "/storage/v1/object/upload/sign/";
+const UPLOAD_TYPES = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export const text = (value) => ({
   content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
@@ -291,6 +295,22 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "glintmotion_upload",
+    description: [
+      "Send a file from the project's renders/ or snapshots/ folder to a signed upload URL, e.g. the",
+      "upload_url from Sociomator's create_media_upload, then pass its media_url to create_post.",
+      "Only Supabase Storage signed upload URLs are accepted; MP4, MOV or JPEG up to 50 MB.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "A file name or path inside renders/ or snapshots/." },
+        upload_url: { type: "string", description: "https URL containing /storage/v1/object/upload/sign/." },
+      },
+      required: ["file", "upload_url"],
+    },
+  },
+  {
     name: "glintmotion_cli",
     description: [
       "Run a Glintmotion engine command in the open project (or `dir`) and return its output, parsed when",
@@ -321,6 +341,7 @@ export const MCP_INSTRUCTIONS = [
   "5. Verify: glintmotion_check, then a contact sheet. Fix what they show before going on.",
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
+  "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
 ].join("\n");
@@ -605,6 +626,44 @@ export function createAgentTools(app) {
     return text({ path: dir, opened: open !== false });
   }
 
+  function shareableFile(file) {
+    const dir = app.projectDir();
+    const value = String(file ?? "");
+    const candidates = isAbsolute(value)
+      ? [value]
+      : [join(dir, normalize(value)), ...SHARE_FOLDERS.map((folder) => join(dir, folder, basename(value)))];
+    const found = candidates.find(
+      (path) =>
+        SHARE_FOLDERS.some((folder) => dirname(path) === join(dir, folder)) && existsSync(path) && statSync(path).isFile(),
+    );
+    if (!found) throw new Error(`No file ${value} directly inside renders/ or snapshots/.`);
+    return found;
+  }
+
+  async function upload({ file, upload_url }) {
+    let target;
+    try {
+      target = new URL(String(upload_url ?? ""));
+    } catch {
+      return failure("upload_url is not a URL.");
+    }
+    if (target.protocol !== "https:" || !target.pathname.includes(SIGNED_UPLOAD_PATH)) {
+      return failure("Only Supabase Storage signed upload URLs (https, /storage/v1/object/upload/sign/) are accepted.");
+    }
+    const path = shareableFile(file);
+    const contentType = UPLOAD_TYPES[extname(path).toLowerCase()];
+    if (!contentType) return failure(`Upload MP4, MOV or JPEG files, not ${extname(path) || "this file"}.`);
+    const bytes = readFileSync(path);
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+      return failure(`${basename(path)} is ${Math.round(bytes.byteLength / 1e6)} MB; the limit is 50 MB. Deliver a lighter copy.`);
+    }
+    const response = await fetch(target, { method: "PUT", headers: { "Content-Type": contentType }, body: bytes });
+    if (!response.ok) {
+      return failure(`The upload was refused (${response.status}). ${tail(await response.text(), 400)}`);
+    }
+    return text({ uploaded: basename(path), bytes: bytes.byteLength, contentType });
+  }
+
   function renderReply(job) {
     const reply = text(
       job.status === "running"
@@ -635,6 +694,7 @@ export function createAgentTools(app) {
     glintmotion_render_status: renderStatus,
     glintmotion_render_cancel: ({ job }) => text(app.renders.cancel(job)),
     glintmotion_deliver: deliver,
+    glintmotion_upload: upload,
     glintmotion_cli: cli,
   };
 

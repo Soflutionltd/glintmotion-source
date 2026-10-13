@@ -8,6 +8,8 @@ bin_dir=$(dirname "$self")
 contents=$(cd "$bin_dir/../.." && pwd)
 
 export ELECTRON_RUN_AS_NODE=1 HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_NO_UPDATE_CHECK=1 DO_NOT_TRACK=1
+# Silences the engine's "keep editing in the HyperFrames desktop app" line.
+export HYPERFRAMES_DESKTOP_PROJECT=1
 if [ -x "$contents/MacOS/Glintmotion" ]; then
   export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH:$contents/Resources/ffmpeg"
   exec "$contents/MacOS/Glintmotion" \

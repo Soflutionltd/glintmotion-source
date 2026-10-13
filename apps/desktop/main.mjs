@@ -42,6 +42,8 @@ const engineEnv = {
   ELECTRON_RUN_AS_NODE: "1",
   HYPERFRAMES_NO_TELEMETRY: "1",
   HYPERFRAMES_NO_UPDATE_CHECK: "1",
+  // Silences the engine's "keep editing in the HyperFrames desktop app" line.
+  HYPERFRAMES_DESKTOP_PROJECT: "1",
   DO_NOT_TRACK: "1",
   NO_COLOR: "1",
 };

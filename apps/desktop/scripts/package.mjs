@@ -47,7 +47,7 @@ const [appPath] = await packager({
   icon: join(appDir, "build/icon.icns"),
   appBundleId: "com.soflution.glintmotion",
   appCategoryType: "public.app-category.video",
-  extraResource: [engineDir, join(appDir, "bin"), ...(bundledFfmpeg ? [ffmpegDir] : [])],
+  extraResource: [engineDir, join(appDir, "bin"), join(appDir, "..", "..", "skills"), ...(bundledFfmpeg ? [ffmpegDir] : [])],
   ignore: [
     /^\/stage($|\/)/,
     /^\/out($|\/)/,

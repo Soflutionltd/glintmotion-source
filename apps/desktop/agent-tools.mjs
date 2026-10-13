@@ -363,6 +363,7 @@ export const MCP_INSTRUCTIONS = [
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
   "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
+  "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
 ].join("\n");

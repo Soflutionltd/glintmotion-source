@@ -33,6 +33,7 @@ const engineEntry = app.isPackaged
   ? join(process.resourcesPath, "engine", "node_modules", "@hyperframes", "cli", "bin", "hyperframes.mjs")
   : join(here, "..", "..", "packages", "cli", "bin", "hyperframes.mjs");
 const cliBinDir = app.isPackaged ? join(process.resourcesPath, "bin") : join(here, "bin");
+const skillsDir = app.isPackaged ? join(process.resourcesPath, "skills") : join(here, "..", "..", "skills");
 const CLI_LINK = join(homedir(), ".local", "bin", "glintmotion");
 
 // Finder launches apps with a minimal PATH. Homebrew's ffmpeg comes first (libx264);
@@ -226,6 +227,8 @@ const AGENT_SYSTEM_PROMPT = [
   "Edit the composition files in place. Answer in the language the user writes in, briefly.",
   "Run engine commands as `glintmotion <command>`: it is this app's engine, whereas `npx hyperframes` downloads another version.",
   "Useful: `glintmotion check --json` after editing, `glintmotion timeline --json`, `glintmotion snapshot --at 2,5` to look at frames, `glintmotion beats --json`.",
+  `Before animating text, read ${join(skillsDir, "motion-quality", "SKILL.md")}: moderate eases for text moving on y, scale text from its baseline, no will-change on scaled text.`,
+  "`glintmotion check` reports them as gsap_ease_freezes_on_frame_clock, gsap_text_scale_center_origin and will_change_scaled_text: fix those warnings.",
   "Do not render: the person exports from the studio.",
 ].join(" ");
 const AGENT_ALLOWED_TOOLS = [

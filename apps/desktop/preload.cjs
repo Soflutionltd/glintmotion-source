@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("glintmotion", {
   exports: {
     choose: (request) => ipcRenderer.invoke("exports:choose", request),
     save: (request) => ipcRenderer.invoke("exports:save", request),
+    image: (request) => ipcRenderer.invoke("exports:image", request),
   },
   mcp: {
     info: () => ipcRenderer.invoke("mcp:info"),

@@ -48,6 +48,7 @@
           <div class="composer-bar">
             <div class="chips" role="radiogroup" aria-label="Format">
               <label><input type="radio" name="resolution" value="portrait" checked />Vertical</label>
+              <label><input type="radio" name="resolution" value="post" />Post 4:5</label>
               <label><input type="radio" name="resolution" value="landscape" />Horizontal</label>
               <label><input type="radio" name="resolution" value="square" />Carré</label>
             </div>
@@ -78,6 +79,7 @@
             />
             <div class="chips" role="radiogroup" aria-label="Format">
               <label><input type="radio" name="resolution" value="portrait" />Vertical</label>
+              <label><input type="radio" name="resolution" value="post" />Post 4:5</label>
               <label><input type="radio" name="resolution" value="landscape" checked />Horizontal</label>
               <label><input type="radio" name="resolution" value="square" />Carré</label>
             </div>
@@ -93,6 +95,11 @@
             <span class="quick-thumb"><span class="fmt fmt-portrait"></span></span>
             <span class="quick-label">Vidéo verticale</span>
             <span class="quick-sub">1080×1920 · Reels, TikTok, Stories</span>
+          </button>
+          <button class="quick-card" data-format="post">
+            <span class="quick-thumb"><span class="fmt fmt-post"></span></span>
+            <span class="quick-label">Post Instagram</span>
+            <span class="quick-sub">1080×1350 · photo, carrousel du fil</span>
           </button>
           <button class="quick-card" data-format="landscape">
             <span class="quick-thumb"><span class="fmt fmt-landscape"></span></span>
@@ -317,6 +324,7 @@
           <legend>Format</legend>
           <div class="formats">
             <label><input type="radio" name="resolution" value="portrait" checked /><span class="fmt fmt-portrait"></span>Vertical<small>1080×1920</small></label>
+            <label><input type="radio" name="resolution" value="post" /><span class="fmt fmt-post"></span>Post<small>1080×1350</small></label>
             <label><input type="radio" name="resolution" value="landscape" /><span class="fmt fmt-landscape"></span>Horizontal<small>1920×1080</small></label>
             <label><input type="radio" name="resolution" value="square" /><span class="fmt fmt-square"></span>Carré<small>1080×1080</small></label>
           </div>

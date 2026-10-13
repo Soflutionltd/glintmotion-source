@@ -46,7 +46,7 @@ export const FIRST_VIDEO_PARTS = [
   },
 ];
 
-const RESOLUTIONS = ["portrait", "landscape", "square"];
+const RESOLUTIONS = ["portrait", "post", "landscape", "square"];
 const MAX_TEXT = 2_000;
 const DOMAIN = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/\S*)?$/i;
 
@@ -82,6 +82,15 @@ export function projectNameFor({ site, idea, parent }) {
 export function checkResolution(resolution) {
   if (!RESOLUTIONS.includes(resolution)) throw new Error(`Format inconnu : ${resolution}`);
   return resolution;
+}
+
+/** The engine has no 4:5 preset: a portrait scaffold cut to Instagram's feed post (1080 × 1350). */
+export function toFeedPost(html) {
+  return html
+    .replace(/\s+data-resolution="portrait"/, "")
+    .replace(/(content="width=1080, height=)1920"/, '$11350"')
+    .replace(/(height:\s*)1920px/, "$11350px")
+    .replace(/(data-height=")1920"/, "$11350\"");
 }
 
 function pickedClips(picks) {

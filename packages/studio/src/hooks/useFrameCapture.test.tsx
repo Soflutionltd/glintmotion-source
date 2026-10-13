@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
-import React, { act } from "react";
+import React, { act, type MouseEvent } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveTime, usePlayerStore } from "../player";
 import { useFrameCapture } from "./useFrameCapture";
 
@@ -63,5 +63,21 @@ describe("useFrameCapture", () => {
     usePlayerStore.setState({ isPlaying: false, currentTime: 3 });
     act(() => capture.refreshCaptureFrameTime());
     expect(shownTime()).toBe("3.000");
+  });
+
+  it("hands the frame to the Mac app, which asks where it goes", async () => {
+    const image = vi.fn(async () => "/Users/me/Movies/p 3.0 s.jpg");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    Object.assign(window, { glintmotion: { agent: {}, exports: { image } } });
+    try {
+      usePlayerStore.setState({ isPlaying: false, currentTime: 3 });
+      const click = { preventDefault: () => {} } as MouseEvent<HTMLAnchorElement>;
+      await act(async () => capture.handleCaptureFrameClick(click));
+      expect(image).toHaveBeenCalledWith({ composition: "index.html", time: 3 });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      delete (window as { glintmotion?: unknown }).glintmotion;
+      fetchSpy.mockRestore();
+    }
   });
 });

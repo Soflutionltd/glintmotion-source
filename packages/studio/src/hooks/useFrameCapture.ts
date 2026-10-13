@@ -1,7 +1,12 @@
 import { useMemo, useState, useCallback, useRef, type MouseEvent } from "react";
 import { useMountEffect } from "./useMountEffect";
 import { liveTime, usePlayerStore } from "../player";
-import { buildFrameCaptureFilename, buildFrameCaptureUrl } from "../utils/frameCapture";
+import { getDesktopHost, hostErrorMessage } from "../utils/desktopHost";
+import {
+  buildFrameCaptureFilename,
+  buildFrameCaptureUrl,
+  normalizeCompositionPath,
+} from "../utils/frameCapture";
 import { studioApiFetch } from "../utils/studioApiFetch";
 
 interface UseFrameCaptureParams {
@@ -59,6 +64,15 @@ export function useFrameCapture({
             setTimeout(() => reject(new Error("Save queue timed out")), 5000),
           ),
         ]);
+        // The Mac app asks where the frame goes and offers JPEG next to PNG.
+        const desktop = getDesktopHost();
+        if (desktop) {
+          await desktop.exports.image({
+            composition: normalizeCompositionPath(activeCompPath),
+            time,
+          });
+          return;
+        }
         const href = buildFrameCaptureUrl({
           projectId,
           compositionPath: activeCompPath,
@@ -100,7 +114,7 @@ export function useFrameCapture({
           throw fetchErr;
         }
       } catch (err) {
-        showToast(err instanceof Error ? err.message : "Capture failed", "error");
+        showToast(err instanceof Error ? hostErrorMessage(err) : "Capture failed", "error");
       } finally {
         capturingRef.current = false;
         setCapturing(false);

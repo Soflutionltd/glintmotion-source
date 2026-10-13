@@ -8,7 +8,7 @@ export interface FrameCaptureRequest {
   version?: number;
 }
 
-function normalizeCompositionPath(compositionPath: string | null): string {
+export function normalizeCompositionPath(compositionPath: string | null): string {
   return compositionPath && compositionPath !== "master" ? compositionPath : "index.html";
 }
 

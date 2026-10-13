@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { FIRST_VIDEO_PARTS, firstVideoPrompt, projectNameFor, readSiteOrIdea } from "./first-video.mjs";
+import {
+  checkResolution,
+  FIRST_VIDEO_PARTS,
+  firstVideoPrompt,
+  projectNameFor,
+  readSiteOrIdea,
+  toFeedPost,
+} from "./first-video.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const firstPicks = Object.fromEntries(FIRST_VIDEO_PARTS.map((part) => [part.id, part.clips[0].block]));
@@ -59,5 +66,35 @@ describe("first-video card", () => {
       () => firstVideoPrompt({ picks: { ...firstPicks, hook: "rm -rf" }, site: null, idea: "x" }),
       /Choisis un extrait pour « Accroche »/,
     );
+  });
+});
+
+describe("feed post format", () => {
+  it("cuts the engine's portrait scaffold to 1080 × 1350 everywhere it names the height", () => {
+    // What `init --example blank --resolution portrait` writes (engine 0.8.152).
+    const portrait = `<html lang="en" data-resolution="portrait">
+    <meta name="viewport" content="width=1080, height=1920" />
+      html,
+      body {
+        margin: 0;
+        width: 1080px;
+        height: 1920px;
+      }
+    <div
+      id="root"
+      data-width="1080"
+      data-height="1920"
+    >`;
+    const post = toFeedPost(portrait);
+    assert.doesNotMatch(post, /1920/);
+    assert.doesNotMatch(post, /data-resolution/);
+    assert.match(post, /content="width=1080, height=1350"/);
+    assert.match(post, /height: 1350px;/);
+    assert.match(post, /data-height="1350"/);
+  });
+
+  it("is a format createProject accepts", () => {
+    assert.equal(checkResolution("post"), "post");
+    assert.throws(() => checkResolution("4:5"), /Format inconnu/);
   });
 });

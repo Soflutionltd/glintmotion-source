@@ -132,7 +132,12 @@ export const AGENT_TOOLS = [
       type: "object",
       properties: {
         name: { type: "string", description: "Folder name: letters, digits, spaces, dashes, dots." },
-        resolution: { type: "string", enum: ["portrait", "landscape", "square"], default: "portrait" },
+        resolution: {
+          type: "string",
+          enum: ["portrait", "post", "landscape", "square"],
+          default: "portrait",
+          description: "portrait 1080×1920, post 1080×1350 (Instagram feed), landscape 1920×1080, square 1080×1080.",
+        },
         parent: { type: "string", description: "Absolute folder to create it in. Default ~/Movies/Glintmotion." },
         open: { type: "boolean", default: true },
       },

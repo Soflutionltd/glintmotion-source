@@ -6,6 +6,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   Notification,
   powerMonitor,
   safeStorage,
@@ -27,10 +28,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { copyFile } from "node:fs/promises";
+import { copyFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
@@ -41,7 +42,14 @@ import { CLI_COMMANDS } from "./agent-tools.mjs";
 import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createWhatsNew } from "./whats-new.mjs";
-import { checkResolution, FIRST_VIDEO_PARTS, firstVideoPrompt, projectNameFor, readSiteOrIdea } from "./first-video.mjs";
+import {
+  checkResolution,
+  FIRST_VIDEO_PARTS,
+  firstVideoPrompt,
+  projectNameFor,
+  readSiteOrIdea,
+  toFeedPost,
+} from "./first-video.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -218,22 +226,26 @@ function createProject({ name, parent, resolution }) {
   if (!/^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u.test(safeName)) {
     throw new Error("Nom invalide : lettres, chiffres, espaces, tirets et points seulement.");
   }
-  if (!["portrait", "landscape", "square"].includes(resolution)) {
-    throw new Error(`Format inconnu : ${resolution}`);
-  }
+  checkResolution(resolution);
   mkdirSync(parent, { recursive: true });
   const dir = join(parent, safeName);
   if (existsSync(dir)) throw new Error(`Le dossier ${dir} existe déjà.`);
 
   return new Promise((resolve, reject) => {
-    const args = ["init", safeName, "--example", "blank", "--non-interactive", "--resolution", resolution];
+    const preset = resolution === "post" ? "portrait" : resolution;
+    const args = ["init", safeName, "--example", "blank", "--non-interactive", "--resolution", preset];
     const child = runEngine(args, parent);
     let output = "";
     child.stdout.on("data", (c) => (output += c));
     child.stderr.on("data", (c) => (output += c));
     child.on("exit", (code) => {
-      if (code === 0 && existsSync(join(dir, "index.html"))) resolve(dir);
-      else reject(new Error(`La création a échoué (code ${code}).\n${output.slice(-800)}`));
+      const index = join(dir, "index.html");
+      if (code !== 0 || !existsSync(index)) {
+        reject(new Error(`La création a échoué (code ${code}).\n${output.slice(-800)}`));
+        return;
+      }
+      if (resolution === "post") writeFileSync(index, toFeedPost(readFileSync(index, "utf-8")));
+      resolve(dir);
     });
   });
 }
@@ -744,16 +756,64 @@ function takeExportTarget(id) {
   return target;
 }
 
+function announceExport(path) {
+  savedExports.add(path);
+  if (Notification.isSupported()) {
+    const notice = new Notification({ title: "Export enregistré", body: basename(path), silent: true });
+    notice.on("click", () => shell.showItemInFolder(path));
+    notice.show();
+  }
+  return path;
+}
+
 /** Same volume: APFS clones the file instantly instead of copying it. */
 async function copyToTarget(source, target) {
   await copyFile(source, target.path, fsConstants.COPYFILE_FICLONE);
-  savedExports.add(target.path);
-  if (Notification.isSupported()) {
-    const notice = new Notification({ title: "Export enregistré", body: basename(target.path), silent: true });
-    notice.on("click", () => shell.showItemInFolder(target.path));
-    notice.show();
+  return announceExport(target.path);
+}
+
+/** The frame the studio shows, at full size, as a JPEG or a PNG: the extension picked decides. */
+async function exportImage(request) {
+  if (!studio?.url) throw new Error("Ouvre un projet d'abord.");
+  const projectDir = studio.dir;
+  const composition = String(request?.composition || "index.html");
+  const time = Number(request?.time);
+  if (!/^[\p{L}\p{N} _./-]+\.html$/u.test(composition) || composition.split("/").includes("..")) {
+    throw new Error(`Composition invalide : ${composition}`);
   }
-  return target.path;
+  if (!Number.isFinite(time) || time < 0) throw new Error("Instant invalide.");
+
+  const stem = composition === "index.html" ? basename(projectDir) : basename(composition, ".html");
+  const folder = exportDirs.get(projectDir) ?? DEFAULT_EXPORTS_DIR;
+  const result = await dialog.showSaveDialog(win, {
+    title: "Où enregistrer l'image ?",
+    buttonLabel: "Exporter",
+    defaultPath: join(existsSync(folder) ? folder : homedir(), `${stem} ${time.toFixed(1)} s.jpg`),
+    filters: [
+      { name: "Image JPEG", extensions: ["jpg", "jpeg"] },
+      { name: "Image PNG", extensions: ["png"] },
+    ],
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+  });
+  if (result.canceled || !result.filePath) return null;
+  const png = extname(result.filePath).toLowerCase() === ".png";
+  const path = png || /\.jpe?g$/i.test(result.filePath) ? result.filePath : `${result.filePath}.jpg`;
+  exportDirs.set(projectDir, dirname(path));
+
+  const encoded = composition.split("/").map(encodeURIComponent).join("/");
+  const url = new URL(`/api/projects/${encodeURIComponent(basename(projectDir))}/thumbnail/${encoded}`, studio.url);
+  url.search = new URLSearchParams({ t: String(time), format: "png", output: "source" }).toString();
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Le studio n'a pas pu capturer l'image (HTTP ${response.status}).`);
+  const frame = Buffer.from(await response.arrayBuffer());
+  if (png) {
+    await writeFile(path, frame);
+  } else {
+    const image = nativeImage.createFromBuffer(frame);
+    if (image.isEmpty()) throw new Error("Le studio a renvoyé une image illisible.");
+    await writeFile(path, image.toJPEG(92));
+  }
+  return announceExport(path);
 }
 
 /** The studio does not wait on this call: every failure is told to the person here. */
@@ -776,6 +836,7 @@ async function saveExport(request) {
 
 ipcMain.handle("exports:choose", (_event, request) => chooseExportTarget(request));
 ipcMain.handle("exports:save", (_event, request) => saveExport(request));
+ipcMain.handle("exports:image", (_event, request) => exportImage(request));
 ipcMain.handle("deliver:render", async (_event, request) => {
   const target = takeExportTarget(request?.target);
   const output = await trackDelivery(

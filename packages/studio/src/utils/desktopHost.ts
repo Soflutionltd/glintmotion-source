@@ -72,6 +72,8 @@ export interface DesktopHost {
     }) => Promise<{ id: string; path: string } | null>;
     /** Copies a finished render to its chosen place; null when it failed (the app says why). */
     save: (request: { id: string; filename: string }) => Promise<string | null>;
+    /** Saves the frame at `time` (s) of `composition` where the person picks; null when they cancel. */
+    image: (request: { composition: string; time: number }) => Promise<string | null>;
   };
   deliver: {
     /** Resolves to the delivered file's absolute path, at the `target` from exports.choose. */

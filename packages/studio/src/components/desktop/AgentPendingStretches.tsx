@@ -2,6 +2,7 @@ import { memo, useEffect, useRef } from "react";
 import { X } from "@phosphor-icons/react";
 import { usePlayerStore } from "../../player/store/playerStore";
 import {
+  MAIN_COMPOSITION,
   MAX_AGENT_STRETCHES,
   clearAgentStretches,
   removeAgentStretch,
@@ -22,6 +23,7 @@ export const AgentPendingStretches = memo(function AgentPendingStretches({
 }) {
   const stretches = useAgentStretchStore((s) => s.stretches);
   const lastAddedId = useAgentStretchStore((s) => s.lastAddedId);
+  const composition = useAgentStretchStore((s) => s.composition);
   const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
@@ -53,11 +55,18 @@ export const AgentPendingStretches = memo(function AgentPendingStretches({
           <li key={stretch.id} className="flex items-center gap-1.5">
             <button
               type="button"
+              disabled={stretch.composition !== composition}
               onClick={() => usePlayerStore.getState().requestSeek(stretch.start)}
-              title="Go to this stretch"
-              className="shrink-0 rounded-md bg-studio-accent/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-accent-ink transition-colors hover:bg-studio-accent/25"
+              title={
+                stretch.composition === composition
+                  ? `Go to this stretch of ${stretch.composition}`
+                  : `Drawn on ${stretch.composition}: open it to go to this stretch`
+              }
+              className="shrink-0 rounded-md bg-studio-accent/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-accent-ink transition-colors enabled:hover:bg-studio-accent/25 disabled:opacity-60"
             >
               {index + 1} · {stretch.start.toFixed(2)}–{stretch.end.toFixed(2)} s
+              {stretch.composition !== MAIN_COMPOSITION &&
+                ` · ${stretch.composition.split("/").pop()}`}
             </button>
             <input
               data-agent-stretch-note={stretch.id}

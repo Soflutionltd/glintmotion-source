@@ -5,6 +5,11 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineRuler } from "./TimelineRuler";
 import { setMotionFindings } from "../store/motionCheckStore";
+import {
+  addAgentStretch,
+  clearAgentStretches,
+  setStretchComposition,
+} from "../store/agentStretchStore";
 import { TIMELINE_SCROLL_SETTLE_MS } from "./useTimelineScrollViewport";
 import type { TimelineTheme } from "./timelineTheme";
 
@@ -97,7 +102,7 @@ describe("TimelineRuler", () => {
     act(() => root.unmount());
   });
 
-  it("draws a band under each motion finding's tween, gone once the findings clear", () => {
+  function renderPlainRuler() {
     const host = document.createElement("div");
     const root = createRoot(host);
     act(() =>
@@ -115,6 +120,34 @@ describe("TimelineRuler", () => {
         />,
       ),
     );
+    return { host, root };
+  }
+
+  it("marks only the agent stretches drawn on the composition it shows, numbered like the list", () => {
+    const { host, root } = renderPlainRuler();
+    const shown = () =>
+      [...host.querySelectorAll<HTMLElement>("[data-timeline-agent-stretch]")].map((band) => [
+        band.style.left,
+        band.textContent,
+      ]);
+    act(() => {
+      setStretchComposition("compositions/intro.html");
+      addAgentStretch(0, 1);
+      setStretchComposition(null);
+      addAgentStretch(2, 3);
+    });
+    expect(shown()).toEqual([["40px", "2"]]);
+    act(() => setStretchComposition("compositions/intro.html"));
+    expect(shown()).toEqual([["0px", "1"]]);
+    act(() => {
+      clearAgentStretches();
+      setStretchComposition(null);
+      root.unmount();
+    });
+  });
+
+  it("draws a band under each motion finding's tween, gone once the findings clear", () => {
+    const { host, root } = renderPlainRuler();
     const bands = () => [...host.querySelectorAll<HTMLElement>("[data-timeline-motion-finding]")];
     expect(bands()).toHaveLength(0);
 

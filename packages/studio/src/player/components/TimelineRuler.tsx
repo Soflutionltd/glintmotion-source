@@ -57,26 +57,29 @@ const MotionFindingBands = memo(function MotionFindingBands({ pps }: { pps: numb
   ));
 });
 
-/** The stretches drawn for the agent and not sent yet, numbered as the Agent panel lists them. */
+/** The stretches drawn on this composition and not sent yet, numbered as the Agent panel lists them. */
 const AgentStretchBands = memo(function AgentStretchBands({ pps }: { pps: number }) {
   const stretches = useAgentStretchStore((s) => s.stretches);
-  return stretches.map((stretch, index) => (
-    <div
-      key={stretch.id}
-      data-timeline-agent-stretch={stretch.id}
-      title={stretch.note || "Stretch for the agent"}
-      className="pointer-events-none absolute top-0 border-x border-studio-accent/70 bg-studio-accent/15"
-      style={{
-        left: stretch.start * pps,
-        width: (stretch.end - stretch.start) * pps,
-        height: RULER_H,
-      }}
-    >
-      <span className="absolute top-0.5 left-1 font-mono text-[9px] leading-none text-accent-ink">
-        {index + 1}
-      </span>
-    </div>
-  ));
+  const composition = useAgentStretchStore((s) => s.composition);
+  return stretches.map((stretch, index) =>
+    stretch.composition !== composition ? null : (
+      <div
+        key={stretch.id}
+        data-timeline-agent-stretch={stretch.id}
+        title={stretch.note || "Stretch for the agent"}
+        className="pointer-events-none absolute top-0 border-x border-studio-accent/70 bg-studio-accent/15"
+        style={{
+          left: stretch.start * pps,
+          width: (stretch.end - stretch.start) * pps,
+          height: RULER_H,
+        }}
+      >
+        <span className="absolute top-0.5 left-1 font-mono text-[9px] leading-none text-accent-ink">
+          {index + 1}
+        </span>
+      </div>
+    ),
+  );
 });
 
 // Paints over the one label the header corner would slice, once a scroll settles; mid-scroll a

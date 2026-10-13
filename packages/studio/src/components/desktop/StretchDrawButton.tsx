@@ -2,19 +2,27 @@ import { memo, useEffect } from "react";
 import { Scribble } from "@phosphor-icons/react";
 import {
   MAX_AGENT_STRETCHES,
+  setStretchComposition,
   setStretchDrawing,
   useAgentStretchStore,
 } from "../../player/store/agentStretchStore";
+import { useStudioShellContext } from "../../contexts/StudioContext";
 import { useDockLayoutStore } from "../dock/dockLayoutStore";
 import { Tooltip } from "../ui/Tooltip";
 import { flatActive, flatDisabled, flatIdle } from "../timelineToolbarStyles";
 import { getDesktopHost } from "../../utils/desktopHost";
 
-/** Toggles stretch drawing (D) and brings the Agent panel forward for each stretch drawn. */
+/**
+ * Toggles stretch drawing (D), keeps the stretch store on the composition the timeline shows, and
+ * brings the Agent panel forward for each stretch drawn.
+ */
 export const StretchDrawButton = memo(function StretchDrawButton() {
   const drawing = useAgentStretchStore((s) => s.drawing);
   const full = useAgentStretchStore((s) => s.stretches.length >= MAX_AGENT_STRETCHES);
   const lastAddedId = useAgentStretchStore((s) => s.lastAddedId);
+  const { activeCompPath } = useStudioShellContext();
+
+  useEffect(() => setStretchComposition(activeCompPath), [activeCompPath]);
 
   useEffect(() => {
     if (lastAddedId === null) return;

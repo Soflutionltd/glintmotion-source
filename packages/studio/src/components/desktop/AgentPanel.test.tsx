@@ -75,8 +75,8 @@ describe("AgentPanel with stretches drawn on the timeline", () => {
       prompt: [
         "Keep the music",
         "",
-        "Stretches of the timeline (seconds of the main composition):",
-        "1. 1.00 s to 2.50 s: tighten this part",
+        "Stretches of the timeline (composition file, then seconds from that composition's start):",
+        "1. index.html, 1.00 s to 2.50 s: tighten this part",
       ].join("\n"),
     });
     expect(useAgentStretchStore.getState().stretches).toEqual([]);

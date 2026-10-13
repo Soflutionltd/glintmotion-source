@@ -1,29 +1,45 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  MAIN_COMPOSITION,
   MAX_AGENT_STRETCHES,
   addAgentStretch,
   agentStretchPrompt,
   clearAgentStretches,
   removeAgentStretch,
+  setStretchComposition,
   setStretchDrawing,
   updateAgentStretchNote,
   useAgentStretchStore,
 } from "./agentStretchStore";
 
-afterEach(clearAgentStretches);
+afterEach(() => {
+  clearAgentStretches();
+  setStretchComposition(null);
+});
 
 describe("agentStretchStore", () => {
-  it("keeps a stretch drawn right to left in order, sorted by start, and leaves drawing", () => {
+  it("keeps a stretch drawn right to left in order, numbers in drawing order, and leaves drawing", () => {
     setStretchDrawing(true);
     addAgentStretch(5, 4);
     addAgentStretch(1, 2);
     const { stretches, drawing, lastAddedId } = useAgentStretchStore.getState();
     expect(stretches.map(({ start, end }) => [start, end])).toEqual([
-      [1, 2],
       [4, 5],
+      [1, 2],
     ]);
     expect(drawing).toBe(false);
-    expect(lastAddedId).toBe(stretches[0]!.id);
+    expect(lastAddedId).toBe(stretches[1]!.id);
+  });
+
+  it("records the composition the timeline showed when each stretch was drawn", () => {
+    setStretchComposition("compositions/intro.html");
+    addAgentStretch(0, 1);
+    setStretchComposition(null);
+    addAgentStretch(2, 3);
+    expect(useAgentStretchStore.getState().stretches.map((s) => s.composition)).toEqual([
+      "compositions/intro.html",
+      MAIN_COMPOSITION,
+    ]);
   });
 
   it("edits and drops one stretch by id", () => {
@@ -33,7 +49,7 @@ describe("agentStretchStore", () => {
     updateAgentStretchNote(second!.id, "tighten");
     removeAgentStretch(first!.id);
     expect(useAgentStretchStore.getState().stretches).toEqual([
-      { id: second!.id, start: 2, end: 3, note: "tighten" },
+      { id: second!.id, composition: MAIN_COMPOSITION, start: 2, end: 3, note: "tighten" },
     ]);
   });
 
@@ -47,7 +63,13 @@ describe("agentStretchStore", () => {
 });
 
 describe("agentStretchPrompt", () => {
-  const stretch = (start: number, end: number, note: string) => ({ id: 1, start, end, note });
+  const stretch = (start: number, end: number, note: string, composition = MAIN_COMPOSITION) => ({
+    id: 1,
+    composition,
+    start,
+    end,
+    note,
+  });
 
   it("is the message alone when no stretch is drawn", () => {
     expect(agentStretchPrompt("Make it faster", [])).toBe("Make it faster");
@@ -57,15 +79,15 @@ describe("agentStretchPrompt", () => {
     expect(
       agentStretchPrompt("Keep the colours", [
         stretch(1.2, 3.456, " tighten this "),
-        stretch(5, 6, ""),
+        stretch(5, 6, "", "compositions/intro.html"),
       ]),
     ).toBe(
       [
         "Keep the colours",
         "",
-        "Stretches of the timeline (seconds of the main composition):",
-        "1. 1.20 s to 3.46 s: tighten this",
-        "2. 5.00 s to 6.00 s",
+        "Stretches of the timeline (composition file, then seconds from that composition's start):",
+        "1. index.html, 1.20 s to 3.46 s: tighten this",
+        "2. compositions/intro.html, 5.00 s to 6.00 s",
       ].join("\n"),
     );
   });

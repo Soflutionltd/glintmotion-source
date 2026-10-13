@@ -4,6 +4,7 @@ import { CircleNotch, Pulse } from "@phosphor-icons/react";
 import { useStudioPlaybackContext, useStudioShellContext } from "../../contexts/StudioContext";
 import { usePlayerStore } from "../../player/store/playerStore";
 import { setMotionFindings } from "../../player/store/motionCheckStore";
+import { MAIN_COMPOSITION } from "../../player/store/agentStretchStore";
 import { Tooltip } from "../ui/Tooltip";
 import { flatActive, flatIdle } from "../timelineToolbarStyles";
 import type { MotionCheckReport, MotionIssue } from "../../utils/desktopHost";
@@ -17,6 +18,8 @@ const ISSUE_LABELS: Record<MotionIssue, string> = {
   early_finish: "Finishes early",
   judder: "Shakes",
 };
+
+const NONE: MotionCheckReport["findings"] = [];
 
 type Outcome =
   | { kind: "report"; report: MotionCheckReport; stale: boolean }
@@ -38,7 +41,8 @@ function summaryOf(outcome: Outcome): string {
  */
 export const MotionCheckButton = memo(function MotionCheckButton() {
   const host = getDesktopHost();
-  const { waitForPendingDomEditSaves } = useStudioShellContext();
+  const { waitForPendingDomEditSaves, activeCompPath } = useStudioShellContext();
+  const onMain = !activeCompPath || activeCompPath === MAIN_COMPOSITION;
   const { refreshKey } = useStudioPlaybackContext();
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -54,8 +58,10 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
   useEffect(() => {
     refreshKeyRef.current = refreshKey;
     setOutcome(null);
-    setMotionFindings([]);
   }, [refreshKey]);
+
+  const findings = outcome?.kind === "report" && !outcome.stale ? outcome.report.findings : NONE;
+  useEffect(() => setMotionFindings(onMain ? findings : NONE), [findings, onMain]);
 
   if (!host?.motion) return null;
   const motion = host.motion;
@@ -69,14 +75,11 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
   const check = async () => {
     setRunning(true);
     setOutcome(null);
-    setMotionFindings([]);
     try {
       await waitForPendingDomEditSaves();
       const startKey = refreshKeyRef.current;
       const report = await motion.check();
-      const stale = refreshKeyRef.current !== startKey;
-      if (!stale) setMotionFindings(report.findings);
-      setOutcome({ kind: "report", report, stale });
+      setOutcome({ kind: "report", report, stale: refreshKeyRef.current !== startKey });
     } catch (reason) {
       setOutcome({ kind: "error", message: hostErrorMessage(reason) });
     } finally {
@@ -85,7 +88,6 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
     }
   };
 
-  const findings = outcome?.kind === "report" && !outcome.stale ? outcome.report.findings : [];
   const label = running
     ? "Checking motion frame by frame (about 0.3 s per moving element)"
     : "Check motion: find text that stalls, ticks or shakes";
@@ -133,14 +135,18 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
           >
             <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
               {summaryOf(outcome)}
+              {!onMain &&
+                findings.length > 0 &&
+                ` Times are in ${MAIN_COMPOSITION}: open it to go to them.`}
             </p>
             <div className="min-h-0 overflow-y-auto">
               {findings.map((finding, index) => (
                 <button
                   key={`${finding.issue}-${finding.target}-${finding.start}-${index}`}
                   type="button"
+                  disabled={!onMain}
                   onClick={() => usePlayerStore.getState().requestSeek(finding.start)}
-                  className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-panel-input"
+                  className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors enabled:hover:bg-panel-input"
                 >
                   <span className="flex w-full items-baseline justify-between gap-2 text-[12px]">
                     <span className="min-w-0 truncate font-mono text-panel-text-1">

@@ -12,9 +12,14 @@ const studio = vi.hoisted(() => {
   const listeners = new Set<() => void>();
   const state = {
     refreshKey: 0,
+    activeCompPath: "index.html" as string | null,
     waitForPendingDomEditSaves: vi.fn(() => Promise.resolve()),
     setRefreshKey: (value: number) => {
       state.refreshKey = value;
+      listeners.forEach((listener) => listener());
+    },
+    setActiveCompPath: (value: string | null) => {
+      state.activeCompPath = value;
       listeners.forEach((listener) => listener());
     },
     subscribe: (listener: () => void) => {
@@ -30,6 +35,7 @@ vi.mock("../../contexts/StudioContext", async () => {
   return {
     useStudioShellContext: () => ({
       waitForPendingDomEditSaves: studio.waitForPendingDomEditSaves,
+      activeCompPath: useSyncExternalStore(studio.subscribe, () => studio.activeCompPath),
     }),
     useStudioPlaybackContext: () => ({
       refreshKey: useSyncExternalStore(studio.subscribe, () => studio.refreshKey),
@@ -63,6 +69,7 @@ const click = (element: HTMLElement) => act(async () => element.click());
 
 beforeEach(() => {
   studio.setRefreshKey(0);
+  studio.setActiveCompPath("index.html");
   check = vi.fn<() => Promise<MotionCheckReport>>();
   Object.assign(window, { glintmotion: { agent: {}, motion: { check } } });
   host = document.createElement("div");
@@ -143,5 +150,22 @@ describe("MotionCheckButton", () => {
 
     expect(useMotionCheckStore.getState().findings).toEqual([]);
     expect(dialog()?.textContent).toContain("The project changed during the check");
+  });
+
+  it("keeps the ruler and the seeks to the main composition, whose times the check reports", async () => {
+    check.mockResolvedValue(report([STALL]));
+    render();
+    await click(button());
+    act(() => studio.setActiveCompPath("compositions/intro.html"));
+
+    expect(useMotionCheckStore.getState().findings).toEqual([]);
+    expect(dialog()?.textContent).toContain("Times are in index.html");
+    const row = [...dialog()!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("#title"),
+    );
+    expect(row?.disabled).toBe(true);
+
+    act(() => studio.setActiveCompPath("index.html"));
+    expect(useMotionCheckStore.getState().findings).toEqual([STALL]);
   });
 });

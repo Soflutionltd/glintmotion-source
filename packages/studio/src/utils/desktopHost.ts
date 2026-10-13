@@ -89,6 +89,8 @@ export interface DesktopHost {
     send: (request: { prompt: string; model: string }) => Promise<void>;
     stop: () => Promise<void>;
     reset: () => Promise<void>;
+    /** The request typed on Home for this project, handed out once. */
+    takePending: () => Promise<string | null>;
     onEvent: (callback: (event: AgentEvent) => void) => () => void;
   };
 }

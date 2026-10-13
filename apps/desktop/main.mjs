@@ -1,4 +1,15 @@
-import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, powerMonitor, safeStorage, shell } from "electron";
+import {
+  app,
+  autoUpdater,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  powerMonitor,
+  safeStorage,
+  shell,
+} from "electron";
 import { spawn } from "node:child_process";
 import {
   chmodSync,
@@ -26,6 +37,7 @@ import { CLI_COMMANDS } from "./agent-tools.mjs";
 import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createWhatsNew } from "./whats-new.mjs";
+import { checkResolution, FIRST_VIDEO_PARTS, firstVideoPrompt, projectNameFor, readSiteOrIdea } from "./first-video.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "Glintmotion";
@@ -238,6 +250,30 @@ ipcMain.handle("projects:create", async (_event, options) => {
   const dir = await createProject(options);
   await openStudio(dir);
 });
+/** project dir -> the request typed on Home, sent by the studio's agent panel once it is up. */
+const pendingPrompts = new Map();
+
+/** Home's prompt box (`text` alone) or the four-part card (`picks` plus a site or an idea). */
+async function startFromHome(request) {
+  const resolution = checkResolution(request?.resolution);
+  const text = String(request?.text ?? "").trim();
+  const source = readSiteOrIdea(text);
+  const prompt = request?.picks ? firstVideoPrompt({ picks: request.picks, ...source }) : text;
+  if (!prompt) throw new Error("Décris la vidéo que tu veux.");
+  const parent = DEFAULT_PROJECTS_DIR;
+  const dir = await createProject({ name: projectNameFor({ ...source, parent }), parent, resolution });
+  pendingPrompts.set(dir, prompt);
+  await openStudio(dir);
+}
+
+ipcMain.handle("home:firstVideoParts", () => FIRST_VIDEO_PARTS);
+ipcMain.handle("home:start", (_event, request) => startFromHome(request));
+ipcMain.handle("agent:takePending", () => {
+  if (!studio) return null;
+  const prompt = pendingPrompts.get(studio.dir) ?? null;
+  pendingPrompts.delete(studio.dir);
+  return prompt;
+});
 ipcMain.handle("projects:reveal", (_event, dir) => shell.showItemInFolder(join(dir, "index.html")));
 ipcMain.handle("projects:forget", (_event, dir) => {
   const list = readRecents().filter((r) => r.path !== dir);
@@ -262,6 +298,7 @@ const AGENT_SYSTEM_PROMPT = [
 ].join(" ");
 const AGENT_ALLOWED_TOOLS = [
   "Bash(npm run check)",
+  "Bash(glintmotion capture *)",
   "mcp__glintmotion__*",
   ...CLI_COMMANDS.flatMap((command) => [`Bash(glintmotion ${command})`, `Bash(glintmotion ${command} *)`]),
 ];

@@ -13,15 +13,15 @@ import { AgentPanel } from "./AgentPanel";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-let host: HTMLDivElement;
-let root: Root;
+let host = document.createElement("div");
+let root: Root | null = null;
 let send: ReturnType<typeof vi.fn>;
 
-function desktopHost(): DesktopHost {
+function desktopHost({ pending = null as string | null, loggedIn = true } = {}): DesktopHost {
   send = vi.fn(() => Promise.resolve());
   return {
     claude: {
-      status: () => Promise.resolve({ installed: true, loggedIn: true, email: null, busy: false }),
+      status: () => Promise.resolve({ installed: true, loggedIn, email: null, busy: false }),
       account: vi.fn(),
       cancel: vi.fn(),
     },
@@ -30,20 +30,27 @@ function desktopHost(): DesktopHost {
       send,
       stop: vi.fn(),
       reset: vi.fn(),
+      takePending: () => Promise.resolve(pending),
       onEvent: () => () => {},
     },
   } as unknown as DesktopHost;
 }
 
-beforeEach(async () => {
+async function mount(options?: Parameters<typeof desktopHost>[0]) {
+  act(() => root?.unmount());
+  host.remove();
   host = document.createElement("div");
   document.body.append(host);
-  root = createRoot(host);
-  await act(async () => root.render(<AgentPanel host={desktopHost()} />));
-});
+  const next = createRoot(host);
+  root = next;
+  await act(async () => next.render(<AgentPanel host={desktopHost(options)} />));
+}
+
+beforeEach(() => mount());
 
 afterEach(() => {
-  act(() => root.unmount());
+  act(() => root?.unmount());
+  root = null;
   host.remove();
   clearAgentStretches();
 });
@@ -91,5 +98,22 @@ describe("AgentPanel with stretches drawn on the timeline", () => {
     });
     expect(send).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(host.querySelector("textarea"));
+  });
+});
+
+describe("AgentPanel with a request typed on Home", () => {
+  it("sends it as soon as Claude is signed in, and shows it in the chat", async () => {
+    await mount({ pending: "Une vidéo de lancement pour tonsite.com" });
+    expect(send).toHaveBeenCalledWith({
+      model: "opus",
+      prompt: "Une vidéo de lancement pour tonsite.com",
+    });
+    expect(host.textContent).toContain("Une vidéo de lancement pour tonsite.com");
+  });
+
+  it("leaves it in the composer while Claude still needs a sign-in", async () => {
+    await mount({ pending: "Une vidéo de lancement", loggedIn: false });
+    expect(send).not.toHaveBeenCalled();
+    expect(host.querySelector("textarea")?.value).toBe("Une vidéo de lancement");
   });
 });

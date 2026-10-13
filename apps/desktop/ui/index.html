@@ -35,9 +35,59 @@
       <section class="view is-active" id="view-projects">
         <header class="page-head">
           <h1>Qu'est-ce qu'on anime aujourd'hui ?</h1>
-          <p class="lead">Choisis un format pour démarrer, ou reprends un projet.</p>
         </header>
 
+        <form class="composer" id="composer">
+          <textarea
+            name="text"
+            rows="3"
+            maxlength="2000"
+            placeholder="Décris ta vidéo : le produit, le message, le ton, la durée…"
+            aria-label="Décris ta vidéo"
+          ></textarea>
+          <div class="composer-bar">
+            <div class="chips" role="radiogroup" aria-label="Format">
+              <label><input type="radio" name="resolution" value="portrait" checked />Vertical</label>
+              <label><input type="radio" name="resolution" value="landscape" />Horizontal</label>
+              <label><input type="radio" name="resolution" value="square" />Carré</label>
+            </div>
+            <button type="submit" class="send" aria-label="Créer la vidéo">↑</button>
+          </div>
+          <p class="form-error" hidden></p>
+        </form>
+
+        <section class="first-video" aria-labelledby="fv-title">
+          <div class="fv-head">
+            <div>
+              <h2 id="fv-title">Crée ta première vidéo</h2>
+              <p>
+                Quatre parties tirées de vraies vidéos de lancement. Change celles qui ne te
+                plaisent pas, puis donne ton site ou ton idée : l'agent monte la vidéo.
+              </p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" id="fv-shuffle">Tout changer</button>
+          </div>
+          <ol class="fv-parts" id="fv-parts"></ol>
+          <form class="fv-form" id="fv-form">
+            <input
+              name="text"
+              maxlength="2000"
+              autocomplete="off"
+              placeholder="tonsite.com, ou décris ton idée"
+              aria-label="Ton site ou ton idée"
+            />
+            <div class="chips" role="radiogroup" aria-label="Format">
+              <label><input type="radio" name="resolution" value="portrait" />Vertical</label>
+              <label><input type="radio" name="resolution" value="landscape" checked />Horizontal</label>
+              <label><input type="radio" name="resolution" value="square" />Carré</label>
+            </div>
+            <button type="submit" class="btn btn-primary">Utiliser ce montage →</button>
+          </form>
+          <p class="form-error" hidden></p>
+          <p class="fv-note">Avec ton site, l'agent reprend tes polices, tes couleurs et ton logo.</p>
+        </section>
+
+        <h2 class="section-title">Ou pars d'une page blanche</h2>
         <div class="quick">
           <button class="quick-card" data-format="portrait">
             <span class="quick-thumb"><span class="fmt fmt-portrait"></span></span>
@@ -309,7 +359,21 @@
       </article>
     </template>
 
+    <template id="fv-part-template">
+      <li class="fv-part">
+        <p class="fv-step"><span class="fv-num"></span><span class="fv-label"></span></p>
+        <p class="fv-hint"></p>
+        <div class="fv-clip">
+          <video muted loop playsinline preload="auto"></video>
+          <button type="button" class="fv-swap"><span aria-hidden="true">↻</span></button>
+          <span class="fv-count"></span>
+        </div>
+        <p class="fv-clip-title"></p>
+      </li>
+    </template>
+
     <script src="app.js"></script>
+    <script src="start.js"></script>
     <script src="update-notice.js"></script>
   </body>
 </html>

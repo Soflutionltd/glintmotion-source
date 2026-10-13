@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld("glintmotion", {
   revealProject: (dir) => ipcRenderer.invoke("projects:reveal", dir),
   forgetProject: (dir) => ipcRenderer.invoke("projects:forget", dir),
   home: (action) => ipcRenderer.invoke("app:home", action),
+  start: {
+    firstVideoParts: () => ipcRenderer.invoke("home:firstVideoParts"),
+    project: (request) => ipcRenderer.invoke("home:start", request),
+  },
   mcp: {
     info: () => ipcRenderer.invoke("mcp:info"),
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),
@@ -71,6 +75,7 @@ contextBridge.exposeInMainWorld("glintmotion", {
     send: (request) => ipcRenderer.invoke("agent:send", request),
     stop: () => ipcRenderer.invoke("agent:stop"),
     reset: () => ipcRenderer.invoke("agent:reset"),
+    takePending: () => ipcRenderer.invoke("agent:takePending"),
     onEvent: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on("agent:event", listener);

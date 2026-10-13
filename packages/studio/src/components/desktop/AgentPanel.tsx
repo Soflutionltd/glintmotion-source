@@ -11,6 +11,7 @@ import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
 import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
 import { AgentPendingStretches } from "./AgentPendingStretches";
 import { usePersistedAgentChat, useStudioProjectId } from "./usePersistedAgentChat";
+import { useHomeRequest } from "./useHomeRequest";
 import {
   agentStretchPrompt,
   clearAgentStretches,
@@ -121,8 +122,8 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [items]);
 
-  const send = () => {
-    const message = draft.trim();
+  const send = (text = draft) => {
+    const message = text.trim();
     if ((!message && stretches.length === 0) || busy || !ready) return;
     const prompt = agentStretchPrompt(message, stretches);
     push({ role: "user", text: prompt });
@@ -138,6 +139,10 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
       });
     });
   };
+
+  useHomeRequest(host, claude, ready, (prompt, sendNow) =>
+    sendNow ? send(prompt) : setDraft(prompt),
+  );
 
   const labels = composerLabels(stretches.length);
 

@@ -67,7 +67,11 @@ async function main() {
   const studioDist = resolve(CLI_ROOT, "..", "studio", "dist");
   await waitForStudioDist(studioDist);
   // Only the SPA studioServer.ts serves (index.html, /assets, /icons, /favicon.svg);
-  // the rest of studio/dist is the npm library build.
+  // the rest of studio/dist is the npm library build. Cleared first: vite hashes
+  // every bundle name, so copying over the old tree keeps each previous build's
+  // bundles and the package grows by a full studio per build.
+  rmSync(join(DIST, "studio"), { recursive: true, force: true });
+  mkdirSync(join(DIST, "studio"), { recursive: true });
   for (const entry of ["index.html", "assets", "icons", "favicon.svg"]) {
     copyDir(join(studioDist, entry), join(DIST, "studio", entry));
   }

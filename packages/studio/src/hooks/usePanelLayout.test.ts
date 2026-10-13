@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDockLayoutStore, type DockController } from "../components/dock/dockLayoutStore";
-import { PANEL_IDS, type PanelId } from "../components/dock/panelRegistry";
+import { BASE_PANEL_IDS, PANEL_IDS, type PanelId } from "../components/dock/panelRegistry";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import { usePanelLayout, type InitialPanelLayoutState } from "./usePanelLayout";
 
@@ -26,7 +26,7 @@ function fakeController(): DockController {
 function showDock(visible: PanelId[], controller = fakeController()) {
   useDockLayoutStore.setState({
     controller,
-    openPanels: new Set(PANEL_IDS),
+    openPanels: new Set(BASE_PANEL_IDS),
     visiblePanels: new Set(visible),
     lastActive: {},
     activePanel: null,

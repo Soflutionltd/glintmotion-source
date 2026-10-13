@@ -142,7 +142,7 @@ describe("RenderQueue controls", () => {
       exportButtonIn(host).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "landscape-4k", 30, false);
+    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "landscape-4k", 30, true);
   });
 
   it("refuses a resolution the composition cannot reach, and says why", async () => {
@@ -172,10 +172,10 @@ describe("RenderQueue controls", () => {
       exportButtonIn(host).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "auto", 30, false);
+    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "auto", 30, true);
   });
 
-  it("exports with GPU encoding once the box is ticked, and remembers it", () => {
+  it("exports on the CPU once the GPU box is unticked, and remembers it", () => {
     const onStartRender: Mock<StartRenderHandler> = vi.fn();
     const host = mountRenderQueue(onStartRender);
     const gpu = [...host.querySelectorAll("label")].find((label) =>
@@ -187,8 +187,8 @@ describe("RenderQueue controls", () => {
       exportButtonIn(host).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "auto", 30, true);
-    expect(getPersistedRenderSettings().gpu).toBe(true);
+    expect(onStartRender).toHaveBeenCalledWith("mp4", "standard", "auto", 30, false);
+    expect(getPersistedRenderSettings().gpu).toBe(false);
   });
 
   it("persists a changed format as the literal union value", async () => {
@@ -201,7 +201,7 @@ describe("RenderQueue controls", () => {
       format: "mov",
       quality: "standard",
       fps: 30,
-      gpu: false,
+      gpu: true,
     });
     expect(host.textContent).not.toContain("Use GPU encoding");
   });

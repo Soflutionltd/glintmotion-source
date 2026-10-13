@@ -8,7 +8,7 @@ import * as dockLayout from "./dockLayout";
 import { Dock } from "./Dock";
 import { parseDockLayout } from "./dockLayoutSchema";
 import { useDockLayoutStore } from "./dockLayoutStore";
-import { PANEL_IDS } from "./panelRegistry";
+import { BASE_PANEL_IDS, PANEL_IDS } from "./panelRegistry";
 import { readStudioUiPreferences } from "../../utils/studioUiPreferences";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -130,7 +130,7 @@ afterEach(() => {
 // group and [design|layers|renders|variables] into another; dockview shows
 // only the active tab's content per group. `slideshow` is never part of the
 // default build — StudioRightPanels opens it itself when the file is one.
-const DEFAULT_OPEN = PANEL_IDS.filter((id) => id !== "slideshow");
+const DEFAULT_OPEN = BASE_PANEL_IDS.filter((id) => id !== "slideshow");
 const DEFAULT_VISIBLE = ["preview", "timeline", "compositions", "design"];
 
 describe("Dock on React 19", () => {

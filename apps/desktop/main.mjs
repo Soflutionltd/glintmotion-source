@@ -42,7 +42,7 @@ const SKILL_TARGETS = [join(homedir(), ".claude", "skills"), join(homedir(), ".c
 // Finder launches apps with a minimal PATH. Homebrew's ffmpeg comes first (libx264);
 // the bundled LGPL one covers Macs without it.
 const bundledChrome = app.isPackaged
-  ? join(process.resourcesPath, "chrome-headless-shell", "chrome-headless-shell")
+  ? join(process.resourcesPath, "chrome", "chrome-headless-shell")
   : null;
 
 const engineEnv = {

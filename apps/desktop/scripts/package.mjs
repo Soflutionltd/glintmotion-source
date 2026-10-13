@@ -44,7 +44,9 @@ const chromeBinary = ensured.match(/Path:\s+(\S.*?)\s*$/m)?.[1];
 if (!chromeBinary?.includes(join(".cache", "hyperframes", "chrome", "chrome-headless-shell"))) {
   throw new Error(`Expected the engine's managed chrome-headless-shell, got ${chromeBinary}`);
 }
-const chromeDir = join(stageDir, "chrome-headless-shell");
+// Not "chrome-headless-shell": codesign reads a binary inside a folder of its own name as a
+// bundle and refuses to sign it ("code object is not signed at all" on the .pak beside it).
+const chromeDir = join(stageDir, "chrome");
 cpSync(dirname(chromeBinary), chromeDir, { recursive: true, verbatimSymlinks: true });
 
 const ffmpegDir = join(appDir, "vendor", "ffmpeg");
@@ -81,4 +83,6 @@ const [appPath] = await packager({
   },
 });
 
+// @electron/packager only warns when signing fails and still writes an unsigned app.
+execFileSync("codesign", ["--verify", "--deep", "--strict", join(appPath, "Glintmotion.app")], { stdio: "inherit" });
 console.log(`Glintmotion packaged at ${appPath}`);

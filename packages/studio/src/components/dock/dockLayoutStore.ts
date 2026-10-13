@@ -44,6 +44,8 @@ interface DockLayoutState extends DockSnapshot {
   activatePanel: (id: PanelId) => void;
   closePanel: (id: PanelId) => void;
   togglePanel: (id: PanelId) => void;
+  /** Collapses or brings back the desktop Projects column, keeping its place and width. */
+  toggleProjectsColumn: () => void;
   setZoneVisible: (zone: PanelZone, visible: boolean) => void;
   resetLayout: () => void;
 }
@@ -88,6 +90,12 @@ export const useDockLayoutStore = create<DockLayoutState>((set, get) => ({
     const { openPanels, activatePanel, closePanel } = get();
     if (openPanels.has(id)) closePanel(id);
     else activatePanel(id);
+  },
+  toggleProjectsColumn: () => {
+    const { panels, openPanels, visiblePanels, controller, activatePanel } = get();
+    if (!panels.includes("projects")) return;
+    if (!openPanels.has("projects")) activatePanel("projects");
+    else controller?.setGroupVisible("projects", !visiblePanels.has("projects"));
   },
   setZoneVisible: (zone, visible) => {
     const { controller, openPanels } = get();

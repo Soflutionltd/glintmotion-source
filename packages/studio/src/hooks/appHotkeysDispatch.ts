@@ -95,6 +95,14 @@ export function dispatchModifierKey(
     return true;
   }
 
+  if (key === "b" && !event.shiftKey && !event.altKey && !isTypingTarget(event.target)) {
+    const dock = useDockLayoutStore.getState();
+    if (!dock.panels.includes("projects")) return false;
+    event.preventDefault();
+    dock.toggleProjectsColumn();
+    return true;
+  }
+
   if (key === "g" && !event.altKey && !isTypingTarget(event.target)) {
     event.preventDefault();
     if (cb.readOnlyPreview) return true;

@@ -82,6 +82,28 @@ function mount(
   return host;
 }
 
+/** Fires the dock root's ResizeObserver, as a window or pane resize would. */
+function resizeDock() {
+  const dockObservers = [...liveObservers].filter(({ target }) =>
+    target?.classList.contains("hf-dock"),
+  );
+  act(() => dockObservers.forEach(({ callback }) => callback()));
+}
+
+type GridNode = { type: string; data: unknown; visible?: boolean };
+
+function leafHolding(node: GridNode | undefined, id: string): GridNode | undefined {
+  if (!node) return undefined;
+  if (node.type === "leaf") {
+    return (node.data as { views: string[] }).views.includes(id) ? node : undefined;
+  }
+  for (const child of node.data as GridNode[]) {
+    const found = leafHolding(child, id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** The persisted views of the group holding `id`, after the debounced write lands. */
 function persistedGroupOf(id: string): string | undefined {
   act(() => {
@@ -161,6 +183,32 @@ describe("Dock on React 19", () => {
       await Promise.resolve();
     });
     expect(host.textContent).toContain("Renders (2)");
+  });
+
+  it("collapses the desktop Projects column and brings it back without closing it", () => {
+    mount("p1", {}, { panels: PANEL_IDS, storageKey: "desktop-dock" });
+    const store = () => useDockLayoutStore.getState();
+    expect(store().visiblePanels.has("projects")).toBe(true);
+    act(() => store().toggleProjectsColumn());
+    expect(store().openPanels.has("projects")).toBe(true);
+    expect(store().visiblePanels.has("projects")).toBe(false);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    const saved = readStudioUiPreferences(undefined, "p1", "desktop-dock").dockLayout?.grid.root;
+    expect(leafHolding(saved, "projects")?.visible).toBe(false);
+    act(() => store().toggleProjectsColumn());
+    expect(store().visiblePanels.has("projects")).toBe(true);
+  });
+
+  it("reopens a closed Projects column as its own column, not a tab beside the Agent", () => {
+    mount("p1", {}, { panels: PANEL_IDS, storageKey: "desktop-dock" });
+    act(() => useDockLayoutStore.getState().closePanel("projects"));
+    act(() => useDockLayoutStore.getState().toggleProjectsColumn());
+    expect(useDockLayoutStore.getState().visiblePanels.has("projects")).toBe(true);
+    expect(dockApi?.getPanel("projects")?.group.panels.map((panel) => panel.id)).toEqual([
+      "projects",
+    ]);
   });
 
   it("reopens a closed panel as a tab of its zone's group, not a new group", () => {
@@ -245,10 +293,7 @@ describe("Dock wiring", () => {
     Object.defineProperty(window, "innerWidth", { value: 560, configurable: true });
     try {
       applySideMinimums.mockClear();
-      const dockObservers = [...liveObservers].filter(({ target }) =>
-        target?.classList.contains("hf-dock"),
-      );
-      act(() => dockObservers.forEach(({ callback }) => callback()));
+      resizeDock();
       expect(applySideMinimums).toHaveBeenCalledWith(expect.anything(), 560);
     } finally {
       Object.defineProperty(window, "innerWidth", { value: innerWidth, configurable: true });
@@ -306,10 +351,7 @@ describe("a host's dock", () => {
   it("sizes its sides against its own width, not the window's", () => {
     mount(null, {}, { ...hostDock, dockWidth: () => 700 });
     applySideMinimums.mockClear();
-    const dockObservers = [...liveObservers].filter(({ target }) =>
-      target?.classList.contains("hf-dock"),
-    );
-    act(() => dockObservers.forEach(({ callback }) => callback()));
+    resizeDock();
     expect(applySideMinimums).toHaveBeenCalledWith(expect.anything(), 700);
   });
 });

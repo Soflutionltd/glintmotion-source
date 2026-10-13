@@ -19,7 +19,12 @@ import { installDockAccessibility } from "./dockAccessibility";
 import { DockStripActions } from "./DockStripActions";
 import { DockTab } from "./DockTab";
 import { installTabFill } from "./dockTabFill";
-import { addRegisteredPanel, applySideMinimums, buildEditLayout } from "./dockLayout";
+import {
+  addProjectsColumn,
+  addRegisteredPanel,
+  applySideMinimums,
+  buildEditLayout,
+} from "./dockLayout";
 import { DOCK_PANEL_COMPONENT, parseDockLayout } from "./dockLayoutSchema";
 import { useDockLayoutStore, type DockController, type DockSnapshot } from "./dockLayoutStore";
 import {
@@ -92,9 +97,18 @@ interface DockOptions {
   dockWidth: () => number;
 }
 
-function createController(api: DockviewApi, options: DockOptions): DockController {
+function createController(
+  api: DockviewApi,
+  options: DockOptions,
+  onChange: () => void,
+): DockController {
   const open = (id: PanelId) => {
     if (api.getPanel(id)) return;
+    // Its own leftmost column; as a left-zone panel it would otherwise join the Agent's tabs.
+    if (id === "projects") {
+      addProjectsColumn(api);
+      return;
+    }
     const { zone, reopen: preferred } = PANEL_DEFINITIONS[id];
     const reopen: PanelDefinition["reopen"] =
       zone === "center" || options.panels.includes(preferred.near)
@@ -124,7 +138,13 @@ function createController(api: DockviewApi, options: DockOptions): DockControlle
       if (panel) api.removePanel(panel);
     },
     setTitle: (id, title) => api.getPanel(id)?.api.setTitle(title),
-    setGroupVisible: (id, visible) => api.getPanel(id)?.group.api.setVisible(visible),
+    // dockview emits no layout change for a group's visibility: sync and persist here.
+    setGroupVisible: (id, visible) => {
+      const group = api.getPanel(id)?.group;
+      if (!group || group.api.isVisible === visible) return;
+      group.api.setVisible(visible);
+      onChange();
+    },
     reset: () => buildEditLayout(api, options.dockWidth(), options.panels),
   };
 }
@@ -185,7 +205,10 @@ function Root({
       const resizeObserver = new ResizeObserver(() => applySideMinimums(api, dockWidth()));
       if (root) resizeObserver.observe(root);
       const store = useDockLayoutStore.getState();
-      store.attach(createController(api, options), panels);
+      store.attach(
+        createController(api, options, () => onDockChange()),
+        panels,
+      );
       store.sync(snapshot(api));
       const pending = store.takePendingActivation();
       if (pending) api.getPanel(pending)?.api.setActive();

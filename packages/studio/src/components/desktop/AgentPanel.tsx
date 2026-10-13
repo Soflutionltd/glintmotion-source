@@ -8,6 +8,7 @@ import type {
 } from "../../utils/desktopHost";
 import { hostErrorMessage } from "../../utils/desktopHost";
 import { ClaudeAccountMenu } from "./ClaudeAccountMenu";
+import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
 
 type ChatItem =
   | { id: number; role: "user"; text: string }
@@ -124,6 +125,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 pt-2.5 pb-2">
+        <ProjectsColumnToggle when="hidden" />
         <ClaudeAccountMenu
           status={claude}
           pending={pending}

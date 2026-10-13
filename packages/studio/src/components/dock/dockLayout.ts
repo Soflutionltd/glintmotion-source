@@ -100,6 +100,19 @@ function addSideColumn(
   return first;
 }
 
+/** No reference panel: the column spans the full dock height, beside the timeline too. */
+export function addProjectsColumn(api: DockviewApi) {
+  api.addPanel({
+    id: "projects",
+    component: DOCK_PANEL_COMPONENT,
+    title: PANEL_DEFINITIONS.projects.title,
+    renderer: "always",
+    minimumWidth: MIN_SIDE_W_FLOOR,
+    position: { direction: "left" },
+  });
+  api.getPanel("projects")?.group.api.setSize({ width: PROJECTS_W });
+}
+
 /** The default Edit layout: [library | preview | inspector] over a full-width timeline. */
 export function buildEditLayout(
   api: DockviewApi,
@@ -114,17 +127,7 @@ export function buildEditLayout(
   addRegisteredPanel(api, "timeline", { referencePanel: "preview", direction: "below" });
   const left = addSideColumn(api, DEFAULT_LEFT, panels, "left");
   const right = addSideColumn(api, DEFAULT_RIGHT, panels, "right");
-  if (panels.includes("projects")) {
-    // No reference panel: the column spans the full dock height, beside the timeline too.
-    api.addPanel({
-      id: "projects",
-      component: DOCK_PANEL_COMPONENT,
-      title: PANEL_DEFINITIONS.projects.title,
-      renderer: "always",
-      minimumWidth: MIN_SIDE_W_FLOOR,
-      position: { direction: "left" },
-    });
-  }
+  if (panels.includes("projects")) addProjectsColumn(api);
   applySideMinimums(api, viewportWidth);
   if (left) api.getPanel(left)?.group.api.setSize({ width: widths.left });
   if (right) api.getPanel(right)?.group.api.setSize({ width: widths.right });

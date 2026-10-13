@@ -201,6 +201,18 @@ describe("Dock on React 19", () => {
     expect(store().visiblePanels.has("projects")).toBe(true);
   });
 
+  it("collapses the Projects column from the control in its own tab, keeping it open", () => {
+    const host = mount("p1", {}, { panels: PANEL_IDS, storageKey: "desktop-dock" });
+    const tab = host.querySelector('[data-tab-panel-id="projects"]');
+    const collapse = tab?.querySelector<HTMLElement>(".hf-dock-tab-collapse");
+    expect(collapse?.getAttribute("aria-label")).toBe("Hide projects");
+    expect(tab?.querySelector(".hf-dock-tab-icon")).toBeNull();
+    act(() => collapse?.click());
+    const store = useDockLayoutStore.getState();
+    expect(store.openPanels.has("projects")).toBe(true);
+    expect(store.visiblePanels.has("projects")).toBe(false);
+  });
+
   it("reopens a closed Projects column as its own column, not a tab beside the Agent", () => {
     mount("p1", {}, { panels: PANEL_IDS, storageKey: "desktop-dock" });
     act(() => useDockLayoutStore.getState().closePanel("projects"));

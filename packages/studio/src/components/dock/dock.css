@@ -162,6 +162,25 @@
   }
 }
 
+/* Projects' own collapse control, in place of its type icon: always there, like a sidebar toggle. */
+.hf-dock-tab-collapse {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -3px;
+  border-radius: 5px;
+  color: var(--color-panel-text-3);
+  cursor: pointer;
+}
+
+.hf-dock-tab-collapse:hover {
+  background: var(--color-panel-input);
+  color: var(--color-panel-text-1);
+}
+
 /* Takes its space whenever the tab is shown, so hover never moves the label. */
 .hf-dock-tab-close {
   display: flex;

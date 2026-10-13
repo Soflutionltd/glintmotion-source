@@ -1,7 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { Plus, Rows } from "@phosphor-icons/react";
 import type { DesktopHost, DesktopProject } from "../../utils/desktopHost";
-import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
 
 const rowClass =
   "flex w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[12px] transition-colors";
@@ -36,17 +35,14 @@ export const ProjectsPanel = memo(function ProjectsPanel({ host }: { host: Deskt
 
   return (
     <div className="flex h-full min-h-0 flex-col px-2 py-2.5">
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => void host.home("new")}
-          className={`${rowClass} text-panel-text-2 hover:bg-panel-input hover:text-panel-text-1`}
-        >
-          <Plus size={14} aria-hidden="true" />
-          New project
-        </button>
-        <ProjectsColumnToggle when="shown" />
-      </div>
+      <button
+        type="button"
+        onClick={() => void host.home("new")}
+        className={`${rowClass} text-panel-text-2 hover:bg-panel-input hover:text-panel-text-1`}
+      >
+        <Plus size={14} aria-hidden="true" />
+        New project
+      </button>
       <div className="mt-3 px-2.5 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
         Recent
       </div>

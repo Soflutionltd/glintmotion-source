@@ -11,6 +11,7 @@ import {
   MusicNotes,
   Presentation,
   Rows,
+  SidebarSimple,
   Sparkle,
   SlidersHorizontal,
   SquaresFour,
@@ -20,6 +21,7 @@ import {
 } from "@phosphor-icons/react";
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import { isPanelId, type PanelId } from "./panelRegistry";
+import { useDockLayoutStore } from "./dockLayoutStore";
 
 const TAB_ICONS: Record<PanelId, Icon> = {
   preview: Monitor,
@@ -55,7 +57,24 @@ export function DockTab({ api }: IDockviewPanelHeaderProps) {
   const TypeIcon = isPanelId(api.id) ? TAB_ICONS[api.id] : null;
   return (
     <div className="hf-dock-tab">
-      {TypeIcon ? <TypeIcon className="hf-dock-tab-icon" size={14} aria-hidden /> : null}
+      {api.id === "projects" ? (
+        <div
+          role="button"
+          tabIndex={-1}
+          aria-label="Hide projects"
+          title="Hide projects (⌘B)"
+          className="hf-dock-tab-collapse"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            useDockLayoutStore.getState().toggleProjectsColumn();
+          }}
+        >
+          <SidebarSimple size={14} aria-hidden />
+        </div>
+      ) : TypeIcon ? (
+        <TypeIcon className="hf-dock-tab-icon" size={14} aria-hidden />
+      ) : null}
       <span className="hf-dock-tab-label">{title}</span>
       {/* Same shape as dockview's own close control: a tab cannot hold a focusable button. */}
       <div

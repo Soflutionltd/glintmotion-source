@@ -12,6 +12,7 @@ import { parseHtmlStructure, readAttr, truncateSnippet } from "./utils";
 import { coreRules } from "./rules/core";
 import { mediaRules } from "./rules/media";
 import { gsapRules } from "./rules/gsap";
+import { motionQualityRules } from "./rules/motionQuality";
 import { captionRules } from "./rules/captions";
 import { compositionRules } from "./rules/composition";
 import { adapterRules } from "./rules/adapters";
@@ -46,6 +47,7 @@ const RULE_GROUPS: ReadonlyArray<{
   { group: "fonts", rules: fontRules },
   { group: "slideshow", rules: slideshowRules },
   { group: "structure", rules: structureRules },
+  { group: "motion", rules: motionQualityRules },
 ];
 
 /**

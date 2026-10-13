@@ -379,7 +379,7 @@ function styleLooksFullFrameOverlay(style: string): boolean {
   return coversFrame && styleHasOpaqueBackground(style);
 }
 
-function collectSimpleStyleRules(styles: LintContext["styles"]): Map<string, string> {
+export function collectSimpleStyleRules(styles: LintContext["styles"]): Map<string, string> {
   const rules = new Map<string, string>();
   for (const style of styles) {
     for (const [, selectorList, body] of style.content.matchAll(/([^{}]+)\{([^}]+)\}/g)) {
@@ -394,7 +394,7 @@ function collectSimpleStyleRules(styles: LintContext["styles"]): Map<string, str
   return rules;
 }
 
-function tagSimpleSelectors(tag: OpenTag): string[] {
+export function tagSimpleSelectors(tag: OpenTag): string[] {
   const selectors: string[] = [];
   const id = readAttr(tag.raw, "id");
   if (id) selectors.push(`#${id}`);
@@ -403,7 +403,7 @@ function tagSimpleSelectors(tag: OpenTag): string[] {
   return selectors;
 }
 
-function combinedTagStyle(tag: OpenTag, styleRules: Map<string, string>): string {
+export function combinedTagStyle(tag: OpenTag, styleRules: Map<string, string>): string {
   const styles = [readAttr(tag.raw, "style") || ""];
   for (const selector of tagSimpleSelectors(tag)) {
     const ruleStyle = styleRules.get(selector);

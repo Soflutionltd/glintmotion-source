@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
-import { createKeyStore, deliverRender, generateMusic } from "./media.mjs";
+import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 
@@ -34,10 +34,11 @@ const engineEntry = app.isPackaged
 const cliBinDir = app.isPackaged ? join(process.resourcesPath, "bin") : join(here, "bin");
 const CLI_LINK = join(homedir(), ".local", "bin", "glintmotion");
 
-// Finder launches apps with a minimal PATH; the engine needs Homebrew's ffmpeg.
+// Finder launches apps with a minimal PATH. Homebrew's ffmpeg comes first (libx264);
+// the bundled LGPL one covers Macs without it.
 const engineEnv = {
   ...process.env,
-  PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH ?? "/usr/bin:/bin"].join(":"),
+  PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH ?? "/usr/bin:/bin", BUNDLED_FFMPEG_DIR].join(":"),
   ELECTRON_RUN_AS_NODE: "1",
   HYPERFRAMES_NO_TELEMETRY: "1",
   HYPERFRAMES_NO_UPDATE_CHECK: "1",

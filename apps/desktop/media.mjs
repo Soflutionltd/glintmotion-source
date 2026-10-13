@@ -2,14 +2,21 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ELEVEN_MUSIC_URL = "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192";
 const MUSIC_TIMEOUT_MS = 5 * 60_000;
 /** The studio's loudness meter target: a bed at this level does not light its "too loud" warning. */
 const MUSIC_LUFS = -16;
+/** The LGPL ffmpeg built by scripts/build-ffmpeg.sh: Resources/ffmpeg in the app, vendor/ffmpeg in a checkout. */
+export const BUNDLED_FFMPEG_DIR = process.resourcesPath && existsSync(join(process.resourcesPath, "ffmpeg"))
+  ? join(process.resourcesPath, "ffmpeg")
+  : join(dirname(fileURLToPath(import.meta.url)), "vendor", "ffmpeg");
+// Homebrew's build first: it has libx264, which the bundled LGPL build cannot include.
 const FFMPEG_CANDIDATES = [
   "/opt/homebrew/bin/ffmpeg",
   "/usr/local/bin/ffmpeg",
+  join(BUNDLED_FFMPEG_DIR, "ffmpeg"),
   "/Applications/CompressKit.app/Contents/MacOS/ffmpeg",
 ];
 

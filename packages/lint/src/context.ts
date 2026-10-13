@@ -7,6 +7,8 @@ export type { OpenTag, ExtractedBlock };
 
 export type LintContext = {
   locate: (block: ExtractedBlock, offset: number | undefined) => SourceLocation;
+  /** Offset in `rawSource` of an offset in `block.content` (or in `source` when block is null). */
+  originalOffset: (block: ExtractedBlock | null, offset: number) => number | undefined;
   source: string;
   rawSource: string;
   tags: OpenTag[];
@@ -78,8 +80,14 @@ export function buildLintContext(html: string, options: HyperframeLinterOptions 
       ? {}
       : sourcePosition(rawSource, originalOffset, options.filePath);
   };
+  const originalOffset = (block: ExtractedBlock | null, offset: number): number | undefined => {
+    if (block === null) return mapped.originalOffset(sourceStart + offset);
+    if (block.index === -1 || block.contentStart === undefined) return undefined;
+    return mapped.originalOffset(sourceStart + block.contentStart + offset);
+  };
   return {
     locate,
+    originalOffset,
     source,
     rawSource,
     tags,

@@ -9,9 +9,10 @@
 //   energy): the layer is a resampled bitmap, not re-rasterised type.
 import type { LintContext } from "../context";
 import type { HyperframeLintFinding, LintRule } from "../types";
-import type { OpenTag } from "../utils";
+import type { ExtractedBlock, OpenTag } from "../utils";
 import { readAttr, truncateSnippet } from "../utils";
 import { collectSimpleStyleRules, combinedTagStyle, tagSimpleSelectors } from "./gsap";
+import { easeFix, originFix, willChangeFix } from "./motionFixes";
 
 type Values = Record<string, number | string>;
 
@@ -162,10 +163,12 @@ function willChangeFinding(animation: Animation): HyperframeLintFinding {
 }
 
 type TextScaleContext = {
-  source: string;
-  tags: OpenTag[];
+  lint: LintContext;
+  script: ExtractedBlock;
   styleRules: Map<string, string>;
   origins: Map<string, string>;
+  /** Selectors already given a gsap.set origin fix in this script. */
+  originFixed: Set<string>;
 };
 
 /** The tween's own origin, else the last gsap.set on the selector, else the CSS one. */
@@ -181,16 +184,31 @@ function resolvedOrigin(
   return own ?? origins.get(animation.targetSelector) ?? css ?? undefined;
 }
 
+/** Only an element with no origin anywhere is rewritten; an explicit one was someone's choice. */
+function originFindingWithFix(
+  animation: Animation,
+  origin: string | undefined,
+  ctx: TextScaleContext,
+): HyperframeLintFinding {
+  const canFix = origin === undefined && !ctx.originFixed.has(animation.targetSelector);
+  const fix = canFix ? originFix(ctx.lint, ctx.script, animation) : undefined;
+  if (fix) ctx.originFixed.add(animation.targetSelector);
+  return { ...originFinding(animation, origin), ...(fix && { fix }) };
+}
+
 function textScaleFindings(animation: Animation, ctx: TextScaleContext): HyperframeLintFinding[] {
-  const targets = resolveTargets(animation.targetSelector, ctx.tags).filter((tag) =>
-    isTextLine(tag, ctx.source),
+  const targets = resolveTargets(animation.targetSelector, ctx.lint.tags).filter((tag) =>
+    isTextLine(tag, ctx.lint.source),
   );
   if (targets.length === 0) return [];
   const styles = targets.map((tag) => combinedTagStyle(tag, ctx.styleRules));
   const origin = resolvedOrigin(animation, ctx.origins, styles);
-  const findings = pivotsOnBaseline(origin) ? [] : [originFinding(animation, origin)];
+  const findings = pivotsOnBaseline(origin) ? [] : [originFindingWithFix(animation, origin, ctx)];
   const tweenHint = `will-change:${stringOf(animation.properties.willChange) ?? ""}`;
-  if ([tweenHint, ...styles].some(willChangeTransform)) findings.push(willChangeFinding(animation));
+  if ([tweenHint, ...styles].some(willChangeTransform)) {
+    const fix = willChangeFix(ctx.lint, targets);
+    findings.push({ ...willChangeFinding(animation), ...(fix && { fix }) });
+  }
   return findings;
 }
 
@@ -275,7 +293,12 @@ function worstFreeze(animation: Animation, fps: number): Freeze | null {
   return worst && worst.frozen >= FREEZE_FRAMES ? worst : null;
 }
 
-function freezeFinding(animation: Animation, freeze: Freeze, fps: number): HyperframeLintFinding {
+function freezeFinding(
+  animation: Animation,
+  freeze: Freeze,
+  fps: number,
+  fixIn: { ctx: LintContext; script: ExtractedBlock },
+): HyperframeLintFinding {
   const quantum = AXIS_QUANTUM[freeze.axis] ?? 1;
   const milder = MILDER_EASES.find(
     (name) =>
@@ -283,7 +306,10 @@ function freezeFinding(animation: Animation, freeze: Freeze, fps: number): Hyper
       FREEZE_FRAMES,
   );
   const ease = animation.ease ?? GSAP_DEFAULT_EASE;
+  const fix =
+    milder && animation.ease ? easeFix(fixIn.ctx, fixIn.script, animation, milder) : undefined;
   return {
+    ...(fix && { fix }),
     code: "gsap_ease_freezes_on_frame_clock",
     severity: "warning",
     selector: animation.targetSelector,
@@ -305,6 +331,7 @@ function compositionFps(ctx: LintContext): number {
 function freezeFindings(
   animation: Animation,
   ctx: LintContext,
+  script: ExtractedBlock,
   fps: number,
 ): HyperframeLintFinding[] {
   if (animation.method === "set") return [];
@@ -312,7 +339,7 @@ function freezeFindings(
     isTextLine(tag, ctx.source),
   );
   const freeze = isText ? worstFreeze(animation, fps) : null;
-  return freeze ? [freezeFinding(animation, freeze, fps)] : [];
+  return freeze ? [freezeFinding(animation, freeze, fps, { ctx, script })] : [];
 }
 
 export const motionQualityRules: LintRule<LintContext>[] = [
@@ -323,10 +350,11 @@ export const motionQualityRules: LintRule<LintContext>[] = [
     for (const script of ctx.scripts) {
       const animations = await parseAnimations(script.content);
       const scaleContext = {
-        source: ctx.source,
-        tags: ctx.tags,
+        lint: ctx,
+        script,
         styleRules,
         origins: originsBySelector(animations),
+        originFixed: new Set<string>(),
       };
       for (const animation of animations.filter(animatesScale)) {
         findings.push(...textScaleFindings(animation, scaleContext));
@@ -341,7 +369,7 @@ export const motionQualityRules: LintRule<LintContext>[] = [
     const fps = compositionFps(ctx);
     for (const script of ctx.scripts) {
       for (const animation of await parseAnimations(script.content)) {
-        findings.push(...freezeFindings(animation, ctx, fps));
+        findings.push(...freezeFindings(animation, ctx, script, fps));
       }
     }
     return findings;

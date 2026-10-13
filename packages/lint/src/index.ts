@@ -4,7 +4,11 @@ export type {
   HyperframeLintResult,
   HyperframeLinterOptions,
   LintTimings,
+  LintEdit,
+  LintFix,
 } from "./types.js";
+export { applyLintFixes } from "./fixes.js";
+export type { LintFixOutcome } from "./fixes.js";
 export {
   lintHyperframeHtml,
   lintMediaUrls,

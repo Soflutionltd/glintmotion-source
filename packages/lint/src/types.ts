@@ -14,7 +14,14 @@ export type HyperframeLintFinding = {
   snippet?: string;
   /** Optional standalone entry that command-specific guidance can act on. */
   suggestedComposition?: string;
+  /** A mechanical rewrite of `file` that resolves the finding; applied only on request (`--fix`). */
+  fix?: LintFix;
 };
+
+/** Offsets are UTF-16 indexes into the original file; `expected` guards against stale offsets. */
+export type LintEdit = { start: number; end: number; expected: string; replacement: string };
+
+export type LintFix = { description: string; edits: LintEdit[] };
 
 /**
  * Where a single lint pass spent its time. Attributed per rule-source module

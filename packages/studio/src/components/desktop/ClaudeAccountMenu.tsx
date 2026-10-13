@@ -9,6 +9,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { ClaudeAccountAction, ClaudeStatus } from "../../utils/desktopHost";
+import { menuClasses } from "../ui/menuStyle";
 import { useCloseOnOutside } from "./useCloseOnOutside";
 
 const PENDING_LABELS: Record<ClaudeAccountAction, string> = {
@@ -61,8 +62,8 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
     onCancel();
   };
 
-  const itemClass =
-    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-panel-text-1 transition-colors hover:bg-panel-input disabled:opacity-40";
+  const itemClass = (off: boolean) =>
+    `${menuClasses.row} flex items-center gap-2 ${off ? menuClasses.rowDisabled : menuClasses.rowEnabled}`;
 
   return (
     <div ref={rootRef} className="relative">
@@ -81,11 +82,10 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
       </button>
 
       {open && (
-        <div
-          role="menu"
-          className="absolute left-0 top-7 z-50 w-64 rounded-xl border border-panel-border bg-panel-bg p-1 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_12px_40px_rgba(0,0,0,0.06)]"
-        >
-          <div className="flex min-w-0 items-center gap-2 px-2 pt-1.5 pb-2 text-[11px] text-panel-text-3">
+        <div role="menu" className={`absolute left-0 top-7 z-50 w-64 ${menuClasses.panel}`}>
+          <div
+            className={`flex min-w-0 items-center gap-2 px-3 py-2 text-[11px] text-neutral-500 ${menuClasses.group}`}
+          >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass(status)}`}
               aria-hidden="true"
@@ -96,7 +96,7 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
           </div>
 
           {pending ? (
-            <button type="button" role="menuitem" onClick={cancel} className={itemClass}>
+            <button type="button" role="menuitem" onClick={cancel} className={itemClass(false)}>
               <X size={13} aria-hidden="true" />
               Cancel
             </button>
@@ -106,7 +106,7 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
               role="menuitem"
               disabled={disabled}
               onClick={() => choose("install")}
-              className={itemClass}
+              className={itemClass(disabled)}
             >
               <DownloadSimple size={13} aria-hidden="true" />
               Install Claude Code
@@ -117,7 +117,7 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
               role="menuitem"
               disabled={disabled}
               onClick={() => choose("login")}
-              className={itemClass}
+              className={itemClass(disabled)}
             >
               <SignIn size={13} aria-hidden="true" />
               Sign in to Claude
@@ -129,7 +129,7 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
                 role="menuitem"
                 disabled={disabled}
                 onClick={() => choose("switch")}
-                className={itemClass}
+                className={itemClass(disabled)}
               >
                 <ArrowsClockwise size={13} aria-hidden="true" />
                 Switch account
@@ -139,7 +139,7 @@ export const ClaudeAccountMenu = memo(function ClaudeAccountMenu({
                 role="menuitem"
                 disabled={disabled}
                 onClick={() => choose("logout")}
-                className={itemClass}
+                className={itemClass(disabled)}
               >
                 <SignOut size={13} aria-hidden="true" />
                 Sign out

@@ -155,6 +155,7 @@ export async function generateMusic({ projectDir, prompt, seconds, apiKey }) {
 
 function hexColor(value) {
   const color = String(value ?? "").trim();
+  if (!color) return "black";
   if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error(`Couleur invalide : ${color}`);
   return `0x${color.slice(1)}`;
 }

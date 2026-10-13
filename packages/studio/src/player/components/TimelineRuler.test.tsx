@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineRuler } from "./TimelineRuler";
+import { setMotionFindings } from "../store/motionCheckStore";
 import { TIMELINE_SCROLL_SETTLE_MS } from "./useTimelineScrollViewport";
 import type { TimelineTheme } from "./timelineTheme";
 
@@ -93,6 +94,39 @@ describe("TimelineRuler", () => {
     expect(host.querySelector<HTMLElement>("[data-timeline-ruler-label-mask]")?.style.left).toBe(
       "204.5px",
     );
+    act(() => root.unmount());
+  });
+
+  it("draws a band under each motion finding's tween, gone once the findings clear", () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <TimelineRuler
+          major={[0, 10]}
+          minor={[]}
+          pps={20}
+          trackContentWidth={600}
+          totalH={100}
+          effectiveDuration={30}
+          majorTickInterval={10}
+          theme={{} as TimelineTheme}
+          contentOrigin={80}
+        />,
+      ),
+    );
+    const bands = () => [...host.querySelectorAll<HTMLElement>("[data-timeline-motion-finding]")];
+    expect(bands()).toHaveLength(0);
+
+    act(() =>
+      setMotionFindings([
+        { issue: "stall", target: "#title", start: 1, end: 2.5, message: "", hint: "" },
+      ]),
+    );
+    expect(bands().map((band) => [band.style.left, band.style.width])).toEqual([["20px", "30px"]]);
+
+    act(() => setMotionFindings([]));
+    expect(bands()).toHaveLength(0);
     act(() => root.unmount());
   });
 });

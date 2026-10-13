@@ -4,6 +4,7 @@ import type { TimelineTheme } from "./timelineTheme";
 import { RULER_H, getTimelineBeatEntries } from "./timelineLayout";
 import { formatTimelineTickLabel } from "./timelineRulerGeometry";
 import { usePlayerStore } from "../store/playerStore";
+import { useMotionCheckStore } from "../store/motionCheckStore";
 import { secondsToFrame } from "../lib/time";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import type { TimelineTimeRange } from "../lib/timelineClipIndex";
@@ -40,6 +41,20 @@ function tickIndexUnderHeader(major: number[], pps: number, scrollLeft: number):
   }
   return found;
 }
+
+/** The last motion check's tweens, each as a band under its stretch of the ruler. */
+const MotionFindingBands = memo(function MotionFindingBands({ pps }: { pps: number }) {
+  const findings = useMotionCheckStore((s) => s.findings);
+  return findings.map((finding, index) => (
+    <div
+      key={`${finding.issue}-${finding.target}-${finding.start}-${index}`}
+      data-timeline-motion-finding={finding.issue}
+      title={`${finding.target}: ${finding.message}`}
+      className="absolute bottom-0 h-[3px] rounded-full bg-amber-500/80"
+      style={{ left: finding.start * pps, width: Math.max(2, (finding.end - finding.start) * pps) }}
+    />
+  ));
+});
 
 // Paints over the one label the header corner would slice, once a scroll settles; mid-scroll a
 // fragment can still show.
@@ -201,6 +216,7 @@ export const TimelineRuler = memo(function TimelineRuler({
               <div className="w-px" style={{ height: RULER_H, background: theme.tickMajor }} />
             </div>
           ))}
+          <MotionFindingBands pps={pps} />
           {scrollRef && (
             <HeaderSlicedLabelMask
               scrollRef={scrollRef}

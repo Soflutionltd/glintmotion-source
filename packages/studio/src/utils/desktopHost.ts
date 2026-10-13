@@ -30,6 +30,24 @@ export type ClaudeAccountAction = "install" | "login" | "logout" | "switch";
 
 export type DeliveryPreset = "reel" | "post" | "square" | "original";
 
+export type MotionIssue = "late_start" | "stall" | "tail_tick" | "early_finish" | "judder";
+
+/** One badly-reading tween, as apps/desktop/motion-check.mjs reports it (times in seconds). */
+export interface MotionFinding {
+  issue: MotionIssue;
+  target: string;
+  start: number;
+  end: number;
+  message: string;
+  hint: string;
+}
+
+export interface MotionCheckReport {
+  tweensChecked: number;
+  seconds: number;
+  findings: MotionFinding[];
+}
+
 export interface DesktopHost {
   listProjects: () => Promise<DesktopProject[]>;
   currentProject: () => Promise<DesktopProject | null>;
@@ -41,6 +59,10 @@ export interface DesktopHost {
     clearKey: () => Promise<void>;
     /** Resolves to the new track's project-relative path. */
     generate: (request: { prompt: string; seconds: number }) => Promise<string>;
+  };
+  motion: {
+    /** Watches every tween of the saved project frame by frame; about 0.3 s per tween. */
+    check: () => Promise<MotionCheckReport>;
   };
   deliver: {
     /** Resolves to the delivered file's absolute path. */

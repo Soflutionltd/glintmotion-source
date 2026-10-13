@@ -653,6 +653,7 @@ async function composeMusic(request) {
   }
 }
 ipcMain.handle("music:generate", (_event, request) => composeMusic(request));
+ipcMain.handle("motion:check", () => checkMotion({}));
 ipcMain.handle("deliver:render", (_event, request) =>
   deliverRender({
     projectDir: openProjectDir(),

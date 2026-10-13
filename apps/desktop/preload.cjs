@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("glintmotion", {
     clearKey: () => ipcRenderer.invoke("music:clearKey"),
     generate: (request) => ipcRenderer.invoke("music:generate", request),
   },
+  motion: {
+    check: () => ipcRenderer.invoke("motion:check"),
+  },
   deliver: {
     render: (request) => ipcRenderer.invoke("deliver:render", request),
     reveal: (file) => ipcRenderer.invoke("deliver:reveal", file),

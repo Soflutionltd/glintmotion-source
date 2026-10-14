@@ -59,7 +59,8 @@ const [appPath] = await packager({
   overwrite: true,
   platform: "darwin",
   arch: "arm64",
-  icon: join(appDir, "build/icon.icns"),
+  // The .icon (Icon Composer, Liquid Glass) is compiled by actool into Assets.car; the .icns covers macOS before 26.
+  icon: [join(appDir, "build/icon.icon"), join(appDir, "build/icon.icns")],
   appBundleId: "com.soflution.glintmotion",
   appCategoryType: "public.app-category.video",
   extraResource: [engineDir, join(appDir, "bin"), join(appDir, "..", "..", "skills"), chromeDir, ...(bundledFfmpeg ? [ffmpegDir] : [])],

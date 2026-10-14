@@ -15,8 +15,10 @@ let newParent = "";
 let toastTimer = 0;
 let templateDirs = new Set();
 
-function showToast(message) {
+/** An error, unless `tone` is "done". */
+function showToast(message, tone) {
   toast.textContent = message;
+  toast.classList.toggle("toast-done", tone === "done");
   toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (toast.hidden = true), 8000);
@@ -145,6 +147,7 @@ function renderProjects(projects) {
       await loadProjects();
     });
     grid.append(card);
+    card.dispatchEvent(new CustomEvent("project-card", { bubbles: true, detail: project }));
   }
 }
 

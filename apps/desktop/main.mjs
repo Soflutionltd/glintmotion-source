@@ -40,7 +40,16 @@ import { createRenderJobs } from "./render-jobs.mjs";
 import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
-import { copyTemplate, readTemplates, setTemplate, splitBriefs, templatePrompt } from "./templates.mjs";
+import {
+  copyTemplate,
+  readTemplates,
+  readVariables,
+  seriesCount,
+  seriesPrompt,
+  setTemplate,
+  splitBriefs,
+  templatePrompt,
+} from "./templates.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createWhatsNew } from "./whats-new.mjs";
 import {
@@ -149,6 +158,7 @@ function projectInfo(dir, openedAt) {
     duration: Number(attr("data-duration")) || null,
     videos: count("video"),
     audios: count("audio"),
+    series: seriesCount(dir),
   };
 }
 
@@ -276,13 +286,24 @@ ipcMain.handle("projects:create", async (_event, options) => {
 const pendingPrompts = createPersistentMap(join(app.getPath("userData"), "pending-prompts.json"));
 const templatesFile = () => join(app.getPath("userData"), "templates.json");
 
-/** One new project per brief, each a copy of the template; the first one opens. */
+/**
+ * A template that declares variables makes a series as one project whose series.json holds one
+ * row per brief. Otherwise: one new project per brief, each a copy of the template; the first opens.
+ */
 async function startFromTemplate(request) {
   const source = String(request?.dir ?? "");
   if (!readTemplates(templatesFile()).includes(source)) throw new Error("Ce modèle n'existe plus.");
   const briefs = splitBriefs(request?.text, request?.series === true);
   const parent = DEFAULT_PROJECTS_DIR;
   mkdirSync(parent, { recursive: true });
+  const variables = request?.series === true ? readVariables(source) : [];
+  if (variables.length > 0) {
+    const dir = join(parent, projectNameFor({ site: null, idea: `${basename(source)} série`, parent }));
+    copyTemplate(source, dir);
+    pendingPrompts.set(dir, seriesPrompt(basename(source), briefs, variables));
+    await openStudio(dir);
+    return;
+  }
   const dirs = briefs.map((brief) => {
     const dir = join(parent, projectNameFor({ site: null, idea: brief, parent }));
     copyTemplate(source, dir);
@@ -313,6 +334,17 @@ ipcMain.handle("templates:set", (_event, request) =>
   setTemplate(templatesFile(), String(request?.dir ?? ""), request?.on === true),
 );
 ipcMain.handle("templates:use", (_event, request) => startFromTemplate(request));
+function knownProject(dir) {
+  const path = String(dir ?? "");
+  if (!readRecents().some((recent) => recent.path === path)) throw new Error("Ce projet n'est plus dans la liste.");
+  return path;
+}
+ipcMain.handle("series:export", (_event, dir) => renders.start(knownProject(dir), { series: true }));
+ipcMain.handle("series:status", (_event, dir) => renders.latestFor(knownProject(dir)));
+ipcMain.handle("series:reveal", (_event, dir) => {
+  const first = renders.latestFor(knownProject(dir))?.outputs?.[0];
+  if (first) shell.showItemInFolder(first);
+});
 ipcMain.handle("agent:takePending", () => {
   if (!studio) return null;
   const prompt = pendingPrompts.get(studio.dir) ?? null;

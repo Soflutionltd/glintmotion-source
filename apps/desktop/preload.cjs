@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld("glintmotion", {
     set: (dir, on) => ipcRenderer.invoke("templates:set", { dir, on }),
     use: (request) => ipcRenderer.invoke("templates:use", request),
   },
+  series: {
+    export: (dir) => ipcRenderer.invoke("series:export", dir),
+    status: (dir) => ipcRenderer.invoke("series:status", dir),
+    reveal: (dir) => ipcRenderer.invoke("series:reveal", dir),
+  },
   exports: {
     choose: (request) => ipcRenderer.invoke("exports:choose", request),
     save: (request) => ipcRenderer.invoke("exports:save", request),

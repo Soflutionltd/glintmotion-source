@@ -15,6 +15,9 @@ const SKIPPED = new Set([
 ]);
 export const MAX_SERIES = 12;
 const MAX_BRIEF = 2_000;
+/** One row of variable values per version, as `render --batch` reads it. */
+export const SERIES_FILE = "series.json";
+const ENTITIES = { "&quot;": '"', "&#39;": "'", "&apos;": "'", "&lt;": "<", "&gt;": ">", "&amp;": "&" };
 
 function readList(file) {
   try {
@@ -79,4 +82,84 @@ export function copyTemplate(source, dest) {
     force: false,
     filter: (path) => !SKIPPED.has(basename(path)),
   });
+}
+
+/** The variables a project declares on its root (`data-composition-variables`); [] when none. */
+export function readVariables(dir) {
+  let html;
+  try {
+    html = readFileSync(join(dir, "index.html"), "utf-8");
+  } catch {
+    return [];
+  }
+  const match = /data-composition-variables\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(html);
+  if (!match) return [];
+  const raw = (match[1] ?? match[2]).replace(/&(?:quot|#39|apos|lt|gt|amp);/g, (entity) => ENTITIES[entity]);
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((variable) => typeof variable?.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The versions of a series project, one object of variable values each. Throws on a malformed file. */
+export function loadSeries(dir) {
+  const file = join(dir, SERIES_FILE);
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf-8"));
+  } catch (error) {
+    throw new Error(`${SERIES_FILE} illisible : ${error.message}`);
+  }
+  const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error(`${SERIES_FILE} ne contient aucune version.`);
+  const bad = rows.findIndex((row) => typeof row !== "object" || row === null || Array.isArray(row));
+  if (bad !== -1) throw new Error(`${SERIES_FILE} : la version ${bad + 1} n'est pas un objet de variables.`);
+  if (rows.length > MAX_SERIES) throw new Error(`${rows.length} versions : ${MAX_SERIES} au plus par série.`);
+  return rows;
+}
+
+export function seriesCount(dir) {
+  if (!existsSync(join(dir, SERIES_FILE))) return 0;
+  try {
+    return loadSeries(dir).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Exported files are named after each version when every name is a distinct plain file name. */
+export function seriesOutputKey(rows) {
+  const names = rows.map((row) => (typeof row.name === "string" ? row.name.trim() : ""));
+  const plain = names.every((name) => name && !/[/\\:]/.test(name) && !name.startsWith("."));
+  return plain && new Set(names).size === names.length ? "name" : "index";
+}
+
+function describeVariable(variable) {
+  const options = Array.isArray(variable.options)
+    ? `choix : ${variable.options.map((option) => option?.value ?? option).join(", ")}`
+    : (variable.type ?? "string");
+  const fallback =
+    typeof variable.default === "string" && variable.default
+      ? `Défaut : ${variable.default}`
+      : "Vide : texte du modèle";
+  return `- ${variable.id} (${options}) — ${variable.label ?? variable.id}. ${fallback}.`;
+}
+
+/** What the agent receives when a series of a template that declares variables opens. */
+export function seriesPrompt(templateName, briefs, variables) {
+  return [
+    `Ce projet est une copie du modèle « ${templateName} », pour une série de ${briefs.length} version${briefs.length > 1 ? "s" : ""}. Ne modifie pas index.html : le design et les animations restent ceux du modèle. Chaque version est une ligne de ${SERIES_FILE}, qui ne remplit que ces variables :`,
+    "",
+    ...variables.map(describeVariable),
+    "",
+    `Écris ${SERIES_FILE} : {"rows": [{"name": "…", "<variable>": "…"}, …]}, une ligne par version, dans l'ordre ci-dessous. \`name\` est court et unique : il nomme le fichier exporté. N'écris que les variables qui changent.`,
+    "",
+    ...briefs.flatMap((brief, index) => [`Version ${index + 1} :`, brief, ""]),
+    "Ensuite :",
+    `1. \`glintmotion compare . --batch ${SERIES_FILE} --at <3 à 6 instants où les textes sont affichés> --out snapshots/series.jpg --json\` : regarde la planche, et réécris les phrases que \`repeated\` signale dans plusieurs versions.`,
+    "2. Pour chaque ligne, `glintmotion check --json --variables '<la ligne en JSON>'` : chaque titre doit tenir dans son cadre.",
+    "Ne lance pas l'export : la personne exporte la série depuis l'accueil.",
+  ].join("\n");
 }

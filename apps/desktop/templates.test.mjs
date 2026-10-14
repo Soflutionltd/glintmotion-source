@@ -5,12 +5,18 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   copyTemplate,
+  loadSeries,
   MAX_SERIES,
   readTemplates,
+  readVariables,
+  seriesCount,
+  seriesOutputKey,
+  seriesPrompt,
   setTemplate,
   splitBriefs,
   templatePrompt,
 } from "./templates.mjs";
+import { renderArgs } from "./render-jobs.mjs";
 
 let dir;
 let project;
@@ -89,5 +95,49 @@ describe("copy", () => {
 
   it("never writes over an existing folder", () => {
     assert.throws(() => copyTemplate(project, project), /existe déjà/);
+  });
+});
+
+describe("series by variables", () => {
+  const declared =
+    '<html data-composition-variables="[{&quot;id&quot;:&quot;hook&quot;,&quot;type&quot;:&quot;enum&quot;,&quot;label&quot;:&quot;Accroche&quot;,&quot;default&quot;:&quot;grid&quot;,&quot;options&quot;:[{&quot;value&quot;:&quot;grid&quot;},{&quot;value&quot;:&quot;apps&quot;}]},{&quot;id&quot;:&quot;title&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Titre&quot;,&quot;default&quot;:&quot;&quot;}]"><div data-composition-id="root"></div></html>';
+
+  it("reads the variables a template declares, entities decoded", () => {
+    writeFileSync(join(project, "index.html"), declared);
+    assert.deepEqual(
+      readVariables(project).map((variable) => variable.id),
+      ["hook", "title"],
+    );
+    writeFileSync(join(project, "index.html"), "<div data-composition-id=\"root\"></div>");
+    assert.deepEqual(readVariables(project), []);
+  });
+
+  it("tells the agent which variables each row fills, and every brief in order", () => {
+    writeFileSync(join(project, "index.html"), declared);
+    const prompt = seriesPrompt("Reel", ["Six applis", "Dimanche soir"], readVariables(project));
+    assert.match(prompt, /série de 2 versions/);
+    assert.match(prompt, /- hook \(choix : grid, apps\) — Accroche\. Défaut : grid\./);
+    assert.match(prompt, /- title \(string\) — Titre\. Vide : texte du modèle\./);
+    assert.ok(prompt.indexOf("Six applis") < prompt.indexOf("Dimanche soir"));
+    assert.match(prompt, /compare \. --batch series\.json/);
+  });
+
+  it("loads series.json rows and refuses a malformed one", () => {
+    assert.equal(seriesCount(project), 0);
+    writeFileSync(join(project, "series.json"), JSON.stringify({ rows: [{ name: "A" }, { name: "B" }] }));
+    assert.equal(seriesCount(project), 2);
+    assert.deepEqual(loadSeries(project), [{ name: "A" }, { name: "B" }]);
+    writeFileSync(join(project, "series.json"), JSON.stringify([{ name: "A" }, "B"]));
+    assert.throws(() => loadSeries(project), /version 2 n'est pas un objet/);
+    assert.equal(seriesCount(project), 0);
+  });
+
+  it("names exported files after the versions only when the names are distinct file names", () => {
+    assert.equal(seriesOutputKey([{ name: "Six applis" }, { name: "Dimanche soir" }]), "name");
+    assert.equal(seriesOutputKey([{ name: "A" }, { name: "A" }]), "index");
+    assert.equal(seriesOutputKey([{ name: "A" }, {}]), "index");
+    assert.equal(seriesOutputKey([{ name: "../A" }, { name: "B" }]), "index");
+    const { args } = renderArgs(project, {}, "/tmp/rows.json", "name");
+    assert.match(args.at(-1), /\{name\}\.mp4$/);
   });
 });

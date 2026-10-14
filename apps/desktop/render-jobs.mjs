@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, normalize } from "node:path";
+import { loadSeries, seriesOutputKey } from "./templates.mjs";
 
 const FORMATS = ["mp4", "webm", "mov", "gif"];
 const QUALITIES = ["draft", "looks", "delivery"];
@@ -17,7 +18,7 @@ function projectRelative(value, label) {
 }
 
 /** Engine arguments for one render request; validates every field the agent controls. */
-export function renderArgs(dir, options, batchFile) {
+export function renderArgs(dir, options, batchFile, outputKey = "index") {
   const format = options.format ?? "mp4";
   if (!FORMATS.includes(format)) throw new Error(`Unsupported format: ${format}`);
   const args = ["render", dir, "--format", format];
@@ -43,7 +44,7 @@ export function renderArgs(dir, options, batchFile) {
   }
   const name = `${basename(dir)}_${stamp()}`;
   if (batchFile) {
-    args.push("--batch", batchFile, "--json", "--output", join(dir, "renders", name, `{index}.${format}`));
+    args.push("--batch", batchFile, "--json", "--output", join(dir, "renders", name, `{${outputKey}}.${format}`));
     return { args, output: null };
   }
   if (typeof options.from === "number") args.push("--from", String(options.from));
@@ -125,6 +126,13 @@ export function createRenderJobs({ runEngine }) {
     const running = [...jobs.values()].find((job) => job.status === "running");
     if (running) throw new Error(`Render ${running.id} is still running; wait for it or cancel it first.`);
     let batchFile = null;
+    let outputKey = "index";
+    if (options.series === true) {
+      if (options.batch !== undefined) throw new Error("Pass either series or batch, not both.");
+      const rows = loadSeries(dir);
+      outputKey = seriesOutputKey(rows);
+      options = { ...options, batch: rows };
+    }
     if (options.batch !== undefined) {
       if (!Array.isArray(options.batch) || options.batch.length === 0) {
         throw new Error("batch must be a non-empty array of variable objects.");
@@ -132,11 +140,12 @@ export function createRenderJobs({ runEngine }) {
       batchFile = join(tmpdir(), `glintmotion-batch-${process.pid}-${Date.now()}.json`);
       writeFileSync(batchFile, JSON.stringify(options.batch));
     }
-    const { args, output } = renderArgs(dir, options, batchFile);
+    const { args, output } = renderArgs(dir, options, batchFile, outputKey);
     mkdirSync(join(dir, "renders"), { recursive: true });
     const child = runEngine(args, dir);
     const job = {
       id: `r${++counter}`,
+      dir,
       child,
       batchFile,
       status: "running",
@@ -210,6 +219,11 @@ export function createRenderJobs({ runEngine }) {
     wait,
     cancel,
     list: () => [...jobs.values()].reverse().map(publicJob),
+    /** The project's most recent job, or null: what Home shows on that project's card. */
+    latestFor: (dir) => {
+      const job = [...jobs.values()].reverse().find((entry) => entry.dir === dir);
+      return job ? publicJob(job) : null;
+    },
     stopAll: () => {
       for (const job of jobs.values()) if (job.status === "running") cancel(job.id);
     },

@@ -13,6 +13,7 @@ const cardTemplate = document.getElementById("card-template");
 
 let newParent = "";
 let toastTimer = 0;
+let templateDirs = new Set();
 
 function showToast(message) {
   toast.textContent = message;
@@ -125,6 +126,17 @@ function renderProjects(projects) {
     frame.style.width = `${size.width}px`;
     frame.style.height = `${size.height}px`;
     card.querySelector(".card-open").addEventListener("click", () => openProject(project.path));
+    const isTemplate = templateDirs.has(project.path);
+    const templateTool = card.querySelector('[data-tool="template"]');
+    templateTool.textContent = isTemplate ? "Retirer le modèle" : "Faire un modèle";
+    templateTool.addEventListener("click", async () => {
+      try {
+        await api.templates.set(project.path, !isTemplate);
+      } catch (error) {
+        showToast(cleanError(error));
+      }
+      await loadProjects();
+    });
     card
       .querySelector('[data-tool="reveal"]')
       .addEventListener("click", () => api.revealProject(project.path));
@@ -138,7 +150,10 @@ function renderProjects(projects) {
 
 async function loadProjects() {
   try {
-    renderProjects(await api.listProjects());
+    const [projects, templates] = await Promise.all([api.listProjects(), api.templates.list()]);
+    templateDirs = new Set(templates.map((template) => template.path));
+    renderProjects(projects);
+    document.dispatchEvent(new CustomEvent("templates-loaded", { detail: templates }));
   } catch (error) {
     showToast(cleanError(error));
   }

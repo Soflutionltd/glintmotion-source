@@ -255,6 +255,14 @@ h3 {
   font-size: 18px;
 }
 
+.section-sub {
+  max-width: 60ch;
+  margin: -10px 0 18px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -1091,7 +1099,8 @@ dialog h2 {
   margin-bottom: 8px;
 }
 
-.field input[name="name"] {
+.field input[name="name"],
+.field textarea {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--line-strong);
@@ -1104,10 +1113,38 @@ dialog h2 {
   transition: all 160ms ease-out;
 }
 
-.field input[name="name"]:focus {
+.field input[name="name"]:focus,
+.field textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 140px;
+  line-height: 1.55;
+}
+
+.dialog-sub {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.check input {
+  margin: 2px 0 0;
+  accent-color: var(--ink);
 }
 
 .formats {

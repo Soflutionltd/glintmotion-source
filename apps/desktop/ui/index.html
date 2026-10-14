@@ -89,6 +89,14 @@
           <p class="fv-note">Avec ton site, l'agent reprend tes polices, tes couleurs et ton logo.</p>
         </section>
 
+        <section id="templates" hidden aria-labelledby="templates-title">
+          <h2 class="section-title" id="templates-title">Tes modèles</h2>
+          <p class="section-sub">
+            Une nouvelle version garde le design du modèle : l'agent n'en change que le contenu.
+          </p>
+          <div class="grid" id="template-grid"></div>
+        </section>
+
         <h2 class="section-title">Ou pars d'une page blanche</h2>
         <div class="quick">
           <button class="quick-card" data-format="portrait">
@@ -344,6 +352,34 @@
       </form>
     </dialog>
 
+    <dialog id="template-dialog">
+      <form id="template-form" method="dialog">
+        <div>
+          <h2>Nouvelle version</h2>
+          <p class="dialog-sub">À partir de « <span id="template-name"></span> »</p>
+        </div>
+        <label class="field">
+          <span>Ce que doit dire la nouvelle version</span>
+          <textarea
+            name="text"
+            rows="7"
+            maxlength="24000"
+            required
+            placeholder="Le titre, puis le texte de chaque slide ou de chaque scène…"
+          ></textarea>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="series" />
+          <span>Une série : une version par paragraphe, une ligne vide entre deux versions</span>
+        </label>
+        <p class="form-error" hidden></p>
+        <div class="actions">
+          <button type="button" class="btn btn-secondary" id="cancel-template">Annuler</button>
+          <button type="submit" class="btn btn-primary">Créer</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="busy" id="busy" hidden>
       <div class="spinner"></div>
       <p id="busy-text">Ouverture du studio…</p>
@@ -361,6 +397,7 @@
           </div>
         </button>
         <div class="card-tools">
+          <button class="tool" data-tool="template">Modèle</button>
           <button class="tool" data-tool="reveal">Finder</button>
           <button class="tool" data-tool="forget">Retirer</button>
         </div>
@@ -380,6 +417,7 @@
       </li>
     </template>
 
+    <script src="templates.js"></script>
     <script src="app.js"></script>
     <script src="start.js"></script>
     <script src="update-notice.js"></script>

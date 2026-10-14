@@ -40,6 +40,7 @@ import { createRenderJobs } from "./render-jobs.mjs";
 import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
+import { copyTemplate, readTemplates, setTemplate, splitBriefs, templatePrompt } from "./templates.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createWhatsNew } from "./whats-new.mjs";
 import {
@@ -267,8 +268,29 @@ ipcMain.handle("projects:create", async (_event, options) => {
   const dir = await createProject(options);
   await openStudio(dir);
 });
-/** project dir -> the request typed on Home, sent by the studio's agent panel once it is up. */
-const pendingPrompts = new Map();
+/**
+ * project dir -> the request typed on Home, sent by the studio's agent panel once it is up.
+ * Kept on disk: the other versions of a series wait until the person opens them.
+ */
+const pendingPrompts = createPersistentMap(join(app.getPath("userData"), "pending-prompts.json"));
+const templatesFile = () => join(app.getPath("userData"), "templates.json");
+
+/** One new project per brief, each a copy of the template; the first one opens. */
+async function startFromTemplate(request) {
+  const source = String(request?.dir ?? "");
+  if (!readTemplates(templatesFile()).includes(source)) throw new Error("Ce modèle n'existe plus.");
+  const briefs = splitBriefs(request?.text, request?.series === true);
+  const parent = DEFAULT_PROJECTS_DIR;
+  mkdirSync(parent, { recursive: true });
+  const dirs = briefs.map((brief) => {
+    const dir = join(parent, projectNameFor({ site: null, idea: brief, parent }));
+    copyTemplate(source, dir);
+    pendingPrompts.set(dir, templatePrompt(basename(source), brief));
+    return dir;
+  });
+  for (const dir of dirs.slice(1).reverse()) rememberProject(dir);
+  await openStudio(dirs[0]);
+}
 
 /** Home's prompt box (`text` alone) or the four-part card (`picks` plus a site or an idea). */
 async function startFromHome(request) {
@@ -285,6 +307,11 @@ async function startFromHome(request) {
 
 ipcMain.handle("home:firstVideoParts", () => FIRST_VIDEO_PARTS);
 ipcMain.handle("home:start", (_event, request) => startFromHome(request));
+ipcMain.handle("templates:list", () => readTemplates(templatesFile()).map((dir) => projectInfo(dir, null)));
+ipcMain.handle("templates:set", (_event, request) =>
+  setTemplate(templatesFile(), String(request?.dir ?? ""), request?.on === true),
+);
+ipcMain.handle("templates:use", (_event, request) => startFromTemplate(request));
 ipcMain.handle("agent:takePending", () => {
   if (!studio) return null;
   const prompt = pendingPrompts.get(studio.dir) ?? null;

@@ -22,12 +22,15 @@ npx hyperframes compare <path-a> <path-b> [<path-c> ...] \
 
 Useful options:
 
-- `--at <seconds>` selects the shared comparison time.
+- `--at <seconds>` selects the shared comparison time; several comma-separated times (up to 8) give one row per variant and one column per time.
+- `--batch rows.json` with a single project path makes one variant per variable row (same file as `render --batch`), labelled by its `name`.
 - `--labels <a,b,...>` labels cells in input order.
 - `--out <file>` chooses the sheet path.
 - `--cols <n>` controls its grid.
 - `--json` returns machine-readable results.
 - `--timeout <ms>` changes the per-variant render-ready timeout.
+
+For a series, pass the batch rows and the instants where each version's copy is on screen: the sheet shows the versions side by side, and the result's `repeated` lists the lines found in several versions but not all.
 
 One sheet accepts at most 16 variants. Extra inputs are truncated with a warning; split larger comparisons into several runs.
 

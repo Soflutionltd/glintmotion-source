@@ -1,29 +1,46 @@
 import { failCommand } from "../utils/commandResult.js";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { defineCommand } from "citty";
+import type { Page } from "puppeteer-core";
 import { createContactSheet } from "../capture/contactSheet.js";
-import {
-  openSettledCompositionPage,
-  seekCompositionTimeline,
-} from "../capture/captureCompositionFrame.js";
+import { parseBatchRows } from "./batchRender.js";
 import { c } from "../ui/colors.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { displayPathFromInput, readOptionalString, resolveFromBase } from "../utils/pathArgs.js";
 import { trackCompareSheet } from "../telemetry/events.js";
-import { serveStaticProjectHtml } from "../utils/staticProjectServer.js";
 import { withMeta } from "../utils/updateCheck.js";
 import type { Example } from "./_examples.js";
 
 const MAX_COMPARE_VARIANTS = 16;
+const MAX_COMPARE_TIMES = 8;
 const MAX_COLUMNS = 4;
+const SERIES_CELL_WIDTH = 360;
 const DEFAULT_RENDER_READY_TIMEOUT_MS = 5000;
+// Shorter lines ("Dim. · 21:00", a day initial) are labels a series shares on purpose.
+const REPEATED_LINE_MIN_LENGTH = 12;
 
 export interface CompareVariantSpec {
   label: string;
   inputPath: string;
   displayPath: string;
+  /** A `--batch` row: the variable values this variant renders with. */
+  variables?: Record<string, unknown>;
+}
+
+export interface RepeatedLine {
+  text: string;
+  variants: string[];
 }
 
 export interface PreparedCompareVariant extends CompareVariantSpec {
@@ -34,7 +51,7 @@ export interface PreparedCompareVariant extends CompareVariantSpec {
 export interface ParsedCompareArgs {
   variants: CompareVariantSpec[];
   outPath: string;
-  atSeconds: number;
+  atTimes: number[];
   cols?: number;
   json: boolean;
   timeoutMs: number;
@@ -50,6 +67,9 @@ export interface CompareSuccessPayload {
   ok: true;
   sheet: string;
   variants: { label: string; path: string }[];
+  times: number[];
+  /** Copy found in several variants but not all: a line the series forgot to vary. */
+  repeated: RepeatedLine[];
   rendered: number;
   truncated?: true;
   total?: number;
@@ -63,6 +83,10 @@ export const examples: Example[] = [
   [
     "Compare three variants at a specific timeline time",
     "hyperframes compare ./a ./b ./c --at 2.5 --labels classic,bold,quiet --json",
+  ],
+  [
+    "Series sheet: one row per batch row, one column per time, plus repeated copy",
+    "hyperframes compare . --batch rows.json --at 1,4,9,14 --out renders/series.jpg --json",
   ],
 ];
 
@@ -91,14 +115,42 @@ function parseLabels(value: unknown, pathCount: number): string[] | undefined {
   return labels;
 }
 
-function parseAtSeconds(value: unknown): number {
+function parseAtTimes(value: unknown): number[] {
   const raw = readOptionalString(value);
-  if (!raw) return 0;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("--at must be a non-negative number of seconds");
+  if (!raw) return [0];
+  const times = raw.split(",").map((part) => Number(part.trim()));
+  if (times.some((time) => !Number.isFinite(time) || time < 0)) {
+    throw new Error("--at must be non-negative seconds, comma-separated (e.g. 1,4.5,9)");
   }
-  return parsed;
+  if (times.length > MAX_COMPARE_TIMES) {
+    throw new Error(`--at takes at most ${MAX_COMPARE_TIMES} times`);
+  }
+  return times;
+}
+
+function batchLabel(row: Record<string, unknown>, index: number): string {
+  const name = row.name;
+  return typeof name === "string" && name.trim() ? name.trim() : String(index + 1);
+}
+
+/** One variant per `--batch` row, all rendering the same project. */
+function batchVariants(
+  args: { batch?: unknown; labels?: unknown },
+  paths: string[],
+  cwd: string,
+): CompareVariantSpec[] {
+  const batchPath = resolveFromBase(cwd, readOptionalString(args.batch) ?? "");
+  if (paths.length !== 1) throw new Error("--batch takes exactly one project path");
+  const rows = parseBatchRows(readFileSync(batchPath, "utf-8"), batchPath);
+  if (rows.length < 2) throw new Error("--batch needs 2+ rows to compare");
+  const labels = parseLabels(args.labels, rows.length);
+  const project = paths[0]!;
+  return rows.map((row, index) => ({
+    label: labels?.[index] ?? batchLabel(row, index),
+    inputPath: resolveFromBase(cwd, project),
+    displayPath: displayPathFromInput(cwd, project),
+    variables: row,
+  }));
 }
 
 function parseColumns(value: unknown): number | undefined {
@@ -115,6 +167,22 @@ function defaultCompareCols(cellCount: number): number {
   return Math.max(1, Math.min(MAX_COLUMNS, Math.ceil(Math.sqrt(cellCount))));
 }
 
+function pathVariants(
+  args: { labels?: unknown },
+  paths: string[],
+  cwd: string,
+): CompareVariantSpec[] {
+  if (paths.length < 2) {
+    throw new Error("need 2+ paths to compare");
+  }
+  const labels = parseLabels(args.labels, paths.length);
+  return paths.map((input, index) => ({
+    label: labels?.[index] ?? defaultLabelForPath(input),
+    inputPath: resolveFromBase(cwd, input),
+    displayPath: displayPathFromInput(cwd, input),
+  }));
+}
+
 export function parseCompareArgs(
   args: {
     _?: readonly unknown[];
@@ -124,25 +192,19 @@ export function parseCompareArgs(
     cols?: unknown;
     json?: unknown;
     timeout?: unknown;
+    batch?: unknown;
   },
   cwd = process.cwd(),
 ): ParsedCompareArgs {
   const paths = parsePathArgs(args);
-  if (paths.length < 2) {
-    throw new Error("need 2+ paths to compare");
-  }
-
-  const labels = parseLabels(args.labels, paths.length);
-  const variants = paths.map((input, index) => ({
-    label: labels?.[index] ?? defaultLabelForPath(input),
-    inputPath: resolveFromBase(cwd, input),
-    displayPath: displayPathFromInput(cwd, input),
-  }));
+  const variants = readOptionalString(args.batch)
+    ? batchVariants(args, paths, cwd)
+    : pathVariants(args, paths, cwd);
 
   return {
     variants,
     outPath: resolveFromBase(cwd, readOptionalString(args.out) ?? "compare.png"),
-    atSeconds: parseAtSeconds(args.at),
+    atTimes: parseAtTimes(args.at),
     cols: parseColumns(args.cols),
     json: args.json === true,
     timeoutMs:
@@ -174,6 +236,7 @@ export function buildCompareSuccessPayload(
   sheet: string,
   variants: readonly CompareVariantSpec[],
   capResult: CompareVariantCapResult,
+  series: { times: number[]; repeated: RepeatedLine[] } = { times: [0], repeated: [] },
 ): CompareSuccessPayload {
   const payload: CompareSuccessPayload = {
     ok: true,
@@ -182,6 +245,8 @@ export function buildCompareSuccessPayload(
       label: variant.label,
       path: variant.displayPath,
     })),
+    times: series.times,
+    repeated: series.repeated,
     rendered: variants.length,
   };
   if (capResult.truncated) {
@@ -266,35 +331,81 @@ function cleanupPreparedCompareVariants(variants: readonly PreparedCompareVarian
   }
 }
 
-async function renderCompareVariant(
-  variant: PreparedCompareVariant,
-  opts: { atSeconds: number; framePath: string; timeoutMs: number },
-): Promise<{ framePath: string; renderReadyTimedOut: boolean }> {
-  try {
-    const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
-    const html = await bundleToSingleHtml(variant.projectDir);
-    const server = await serveStaticProjectHtml(variant.projectDir, html);
-    try {
-      const {
-        browser: chromeBrowser,
-        page,
-        renderReadyTimedOut,
-      } = await openSettledCompositionPage(html, server.url, {
-        renderReadyTimeoutMs: opts.timeoutMs,
-        renderReadyWarningSuffix: `comparison variant "${variant.label}" may be inaccurate`,
-      });
-      try {
-        if (opts.atSeconds > 0) {
-          await seekCompositionTimeline(page, opts.atSeconds);
-        }
-        await page.screenshot({ path: opts.framePath, type: "png" });
-        return { framePath: opts.framePath, renderReadyTimedOut };
-      } finally {
-        await chromeBrowser.close();
-      }
-    } finally {
-      await server.close();
+/**
+ * Copy lines that recur in some variants but not every one. A line every variant
+ * shares is the template's fixed copy (brand, tagline); with fewer than three
+ * variants "some but not all" cannot happen.
+ */
+export function findRepeatedLines(
+  copy: readonly { label: string; lines: readonly string[] }[],
+  minLength = REPEATED_LINE_MIN_LENGTH,
+): RepeatedLine[] {
+  if (copy.length < 3) return [];
+  const byKey = new Map<string, { text: string; variants: Set<number> }>();
+  copy.forEach(({ lines }, index) => {
+    for (const line of lines) {
+      const text = line.replace(/\s+/g, " ").trim();
+      if (text.length < minLength || !/\p{L}/u.test(text)) continue;
+      const key = text.normalize("NFC").toLocaleLowerCase();
+      const entry = byKey.get(key) ?? { text, variants: new Set<number>() };
+      entry.variants.add(index);
+      byKey.set(key, entry);
     }
+  });
+  return [...byKey.values()]
+    .filter((entry) => entry.variants.size >= 2 && entry.variants.size < copy.length)
+    .sort((a, b) => b.variants.size - a.variants.size || a.text.localeCompare(b.text))
+    .map((entry) => ({
+      text: entry.text,
+      variants: [...entry.variants].sort((a, b) => a - b).map((index) => copy[index]!.label),
+    }));
+}
+
+/** Every rendered text's own copy, whether or not it is on screen at this instant. */
+function collectCopyLines(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    Array.from(document.body.querySelectorAll("*")).flatMap((element) => {
+      if (element.closest("[data-layout-ignore], script, style, template, noscript")) return [];
+      // checkVisibility ignores opacity: a scene faded out at this instant still counts.
+      if (element.checkVisibility?.() === false) return [];
+      const own = Array.from(element.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent ?? "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return own ? [own] : [];
+    }),
+  );
+}
+
+async function captureCompareVariant(
+  variant: PreparedCompareVariant,
+  opts: { times: number[]; frameDir: string; timeoutMs: number },
+): Promise<{ framePaths: string[]; lines: string[]; renderReadyTimedOut: boolean }> {
+  const lines = new Set<string>();
+  let renderReadyTimedOut = false;
+  try {
+    const { captureSnapshots } = await import("./snapshot.js");
+    const framePaths = await captureSnapshots(variant.projectDir, {
+      at: opts.times,
+      includeEnd: false,
+      outputDir: opts.frameDir,
+      timeout: opts.timeoutMs,
+      variables: variant.variables,
+      quiet: true,
+      record: false,
+      onReady: (info) => {
+        renderReadyTimedOut = info.renderReadyTimedOut;
+      },
+      onFrame: async (page) => {
+        for (const line of await collectCopyLines(page)) lines.add(line);
+      },
+    });
+    if (framePaths.length !== opts.times.length) {
+      throw new Error(`captured ${framePaths.length} of ${opts.times.length} frames`);
+    }
+    return { framePaths, lines: [...lines], renderReadyTimedOut };
   } catch (err) {
     throw new Error(
       `Render failed for variant "${variant.label}" (${variant.displayPath}): ${normalizeErrorMessage(err)}`,
@@ -302,46 +413,78 @@ async function renderCompareVariant(
   }
 }
 
+function sheetLayout(parsed: ParsedCompareArgs, variants: readonly CompareVariantSpec[]) {
+  const times = parsed.atTimes;
+  if (times.length === 1) {
+    return {
+      cols: parsed.cols ?? defaultCompareCols(variants.length),
+      labels: variants.map((variant) => variant.label),
+      cellWidth: undefined,
+    };
+  }
+  return {
+    cols: times.length,
+    labels: variants.flatMap((variant) => times.map((time) => `${variant.label} · ${time}s`)),
+    cellWidth: SERIES_CELL_WIDTH,
+  };
+}
+
 async function renderCompareSheet(parsed: ParsedCompareArgs): Promise<CompareSuccessPayload> {
   const capResult = capCompareVariants(parsed.variants);
   const variants = capResult.variants;
   const prepared = prepareCompareVariantProjects(variants);
-  const frameDir = mkdtempSync(join(tmpdir(), "hf-compare-frames-"));
+  const frameRoot = mkdtempSync(join(tmpdir(), "hf-compare-frames-"));
   const framePaths: string[] = [];
+  const copy: { label: string; lines: string[] }[] = [];
 
   try {
     let renderReadyTimedOut = false;
     for (let i = 0; i < prepared.length; i++) {
       const variant = prepared[i]!;
-      const framePath = join(frameDir, `variant-${String(i + 1).padStart(2, "0")}.png`);
-      const rendered = await renderCompareVariant(variant, {
-        atSeconds: parsed.atSeconds,
-        framePath,
+      const captured = await captureCompareVariant(variant, {
+        times: parsed.atTimes,
+        frameDir: join(frameRoot, `variant-${String(i + 1).padStart(2, "0")}`),
         timeoutMs: parsed.timeoutMs,
       });
-      framePaths.push(rendered.framePath);
-      renderReadyTimedOut = renderReadyTimedOut || rendered.renderReadyTimedOut;
+      framePaths.push(...captured.framePaths);
+      copy.push({ label: variant.label, lines: captured.lines });
+      renderReadyTimedOut = renderReadyTimedOut || captured.renderReadyTimedOut;
     }
 
+    const layout = sheetLayout(parsed, variants);
     mkdirSync(dirname(parsed.outPath), { recursive: true });
     await createContactSheet(framePaths, parsed.outPath, {
-      cols: parsed.cols ?? defaultCompareCols(framePaths.length),
+      cols: layout.cols,
       maxImages: framePaths.length,
       labelMode: "custom",
-      labels: variants.map((variant) => variant.label),
+      labels: layout.labels,
+      cellWidth: layout.cellWidth,
     });
 
     trackCompareSheet({
       command: "compare",
-      cells: variants.length,
+      cells: framePaths.length,
       truncated: capResult.truncated,
       total: capResult.total,
       renderReadyTimedOut,
     });
-    return buildCompareSuccessPayload(parsed.outPath, variants, capResult);
+    return buildCompareSuccessPayload(parsed.outPath, variants, capResult, {
+      times: parsed.atTimes,
+      repeated: findRepeatedLines(copy),
+    });
   } finally {
     cleanupPreparedCompareVariants(prepared);
-    rmSync(frameDir, { recursive: true, force: true });
+    rmSync(frameRoot, { recursive: true, force: true });
+  }
+}
+
+function printRepeatedLines(repeated: readonly RepeatedLine[]): void {
+  if (repeated.length === 0) return;
+  console.log(
+    `\n${c.warn("⚠")}  ${repeated.length} line(s) repeated in some variants but not all:`,
+  );
+  for (const line of repeated) {
+    console.log(`   "${line.text}" ${c.dim(`— ${line.variants.join(", ")}`)}`);
   }
 }
 
@@ -357,16 +500,23 @@ export default defineCommand({
   args: {
     path: {
       type: "positional",
-      description: "Composition project directory or .html file (pass 2+ paths)",
+      description:
+        "Composition project directory or .html file (pass 2+ paths, or one with --batch)",
       required: false,
     },
     at: {
       type: "string",
-      description: "Timeline time in seconds to seek before screenshotting each variant",
+      description:
+        "Timeline time in seconds, or several comma-separated: then one row per variant, one column per time (at most 8)",
+    },
+    batch: {
+      type: "string",
+      description:
+        'JSON array of variable rows (or {"rows":[...]}), as with render --batch: one variant of the single project per row, labelled by its "name"',
     },
     labels: {
       type: "string",
-      description: "Comma-separated labels matching the variant path count",
+      description: "Comma-separated labels matching the variant count",
     },
     out: {
       type: "string",
@@ -374,7 +524,7 @@ export default defineCommand({
     },
     cols: {
       type: "string",
-      description: "Grid columns (default: sqrt heuristic, capped at 4)",
+      description: "Grid columns for a single --at time (default: sqrt heuristic, capped at 4)",
     },
     timeout: {
       type: "string",
@@ -400,6 +550,7 @@ export default defineCommand({
         printJson(payload);
       } else {
         console.log(`\n${c.success("◇")}  Comparison sheet saved to ${payload.sheet}`);
+        printRepeatedLines(payload.repeated);
       }
     } catch (err) {
       const message = normalizeErrorMessage(err);

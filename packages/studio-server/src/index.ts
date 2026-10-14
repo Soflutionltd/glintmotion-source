@@ -52,6 +52,7 @@ export {
   type FileWriteReceipt,
 } from "./helpers/fileVersion.js";
 export { buildSubCompositionHtml } from "./helpers/subComposition.js";
+export { injectPreviewVariables } from "./helpers/previewVariables.js";
 export {
   clearElementScreenshotIsolation,
   getElementScreenshotClip,

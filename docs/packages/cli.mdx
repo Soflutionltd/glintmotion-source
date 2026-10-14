@@ -914,14 +914,23 @@ has nothing to draw.
 npx hyperframes compare ./variant-a ./variant-b --labels "A,B"
 ```
 
-| Flag        | Description                                        |
-| ----------- | -------------------------------------------------- |
-| `--at`      | Timeline time in seconds to seek before capture    |
-| `--labels`  | Comma-separated labels, one per input path         |
-| `--out`     | Output path (default `./compare.png`)              |
-| `--cols`    | Grid columns (default: a sqrt heuristic, max 4)    |
-| `--timeout` | Render-ready timeout per variant (default 5000 ms) |
-| `--json`    | Machine-readable results                           |
+| Flag        | Description                                                                         |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `--at`      | Time in seconds, or up to 8 comma-separated: one row per variant, one column per time |
+| `--batch`   | Variable rows (as `render --batch`): one variant of a single project per row         |
+| `--labels`  | Comma-separated labels, one per variant                                              |
+| `--out`     | Output path (default `./compare.png`)                                                |
+| `--cols`    | Grid columns for a single time (default: a sqrt heuristic, max 4)                    |
+| `--timeout` | Render-ready timeout per variant (default 5000 ms)                                   |
+| `--json`    | Machine-readable results                                                             |
+
+For a series, compare every version at the same instants. The result lists the
+copy found in several variants but not all (`repeated`), a line the series
+forgot to vary:
+
+```bash
+npx hyperframes compare . --batch rows.json --at 1,4,9,14 --out series.jpg
+```
 
 `grade-compare` does the same for colour: candidate grades or LUTs applied to
 one reference frame.

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildCompareSuccessPayload,
   capCompareVariants,
+  findRepeatedLines,
   parseCompareArgs,
   prepareCompareVariantProjects,
 } from "./compare.js";
@@ -37,6 +38,56 @@ describe("parseCompareArgs", () => {
     // — separators + drive letter on Windows — and are covered by the resolution
     // tests; asserting them literally here made this a POSIX-only test.)
     expect(parsed.variants.map((v) => v.label)).toEqual(["warm", "cool", "hero.alt"]);
+  });
+
+  it("reads several --at times and one variant per --batch row", () => {
+    const dir = tempDir();
+    try {
+      writeFileSync(
+        join(dir, "rows.json"),
+        JSON.stringify({ rows: [{ name: "Six applis", hook: "apps" }, { hook: "week" }] }),
+      );
+      const parsed = parseCompareArgs({ _: ["."], batch: "rows.json", at: "1, 4.5,9" }, dir);
+      expect(parsed.atTimes).toEqual([1, 4.5, 9]);
+      expect(parsed.variants.map((v) => v.label)).toEqual(["Six applis", "2"]);
+      expect(parsed.variants[1]?.variables).toEqual({ hook: "week" });
+      expect(new Set(parsed.variants.map((v) => v.inputPath)).size).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a --batch run over several paths and an over-long --at list", () => {
+    expect(() => parseCompareArgs({ _: ["a", "b"], batch: "rows.json" }, "/tmp")).toThrow(
+      "--batch takes exactly one project path",
+    );
+    expect(() => parseCompareArgs({ _: ["a", "b"], at: "0,1,2,3,4,5,6,7,8" }, "/tmp")).toThrow(
+      "--at takes at most 8 times",
+    );
+  });
+});
+
+describe("findRepeatedLines", () => {
+  it("reports copy some variants share but not all, ignoring short labels", () => {
+    const repeated = findRepeatedLines([
+      { label: "A", lines: ["Sociomator", "Glissez un post.", "Programmez. C'est parti."] },
+      { label: "B", lines: ["Sociomator", "glissez  un post.", "Programmez. C'est parti."] },
+      {
+        label: "C",
+        lines: ["Sociomator", "Six applis, un seul geste.", "Programmez. C'est parti."],
+      },
+      { label: "D", lines: ["Sociomator", "Glissez un post.", "Programmez. C'est parti."] },
+    ]);
+    expect(repeated).toEqual([{ text: "Glissez un post.", variants: ["A", "B", "D"] }]);
+  });
+
+  it("has nothing to report for two variants", () => {
+    expect(
+      findRepeatedLines([
+        { label: "A", lines: ["Glissez un post."] },
+        { label: "B", lines: ["Glissez un post."] },
+      ]),
+    ).toEqual([]);
   });
 });
 

@@ -18,6 +18,7 @@ import { pngDimensions } from "../utils/pngDimensions.js";
 import { failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
 import { defineCommand } from "citty";
+import type { Page } from "puppeteer-core";
 import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join, relative, isAbsolute, basename, posix } from "node:path";
@@ -40,6 +41,7 @@ import {
   type RateSpec,
 } from "@hyperframes/core";
 import { resolveProject } from "../utils/project.js";
+import { resolveVariablesArg } from "../utils/variables.js";
 import {
   definitiveEntryMismatchComposition,
   hasDefinitiveEntryMismatch,
@@ -449,7 +451,7 @@ export function computeSnapshotTimes(
  * Render key frames from a composition as PNG screenshots.
  * The agent can Read these to verify its output visually.
  */
-async function captureSnapshots(
+export async function captureSnapshots(
   projectDir: string,
   opts: {
     frames?: number;
@@ -466,11 +468,24 @@ async function captureSnapshots(
     browserGpuMode?: BrowserGpuMode;
     /** Reference video: save its frame at each captured time plus a render|reference pair. */
     against?: string;
+    /** Composition variable overrides, set as `window.__hfVariables` like a render's. */
+    variables?: Record<string, unknown>;
+    /** No progress lines on stdout, for callers that print JSON. */
+    quiet?: boolean;
+    /** False for throwaway frames: they stay out of the project's artifact history. */
+    record?: boolean;
+    onReady?: (info: { renderReadyTimedOut: boolean }) => void;
+    /** Called once each frame is captured, with the page still seeked to `time`. */
+    onFrame?: (page: Page, time: number) => Promise<void>;
   },
 ): Promise<string[]> {
   const { bundleWithLocalizedFonts } = await import("../utils/bundleWithLocalizedFonts.js");
 
-  const capture = await captureArtifactRevision(projectDir).catch(warnSnapshotsNotRecorded);
+  const record = opts.record !== false;
+  const log = opts.quiet ? () => undefined : console.log;
+  const capture = record
+    ? await captureArtifactRevision(projectDir).catch(warnSnapshotsNotRecorded)
+    : undefined;
   const invocation = randomUUID();
   const artifacts: Array<{
     id: string;
@@ -485,7 +500,10 @@ async function captureSnapshots(
 
   // Localize fonts (embed remote @font-face as data URIs, matching the render
   // path) so snapshots render the real font instead of a fallback sans.
-  const html = await bundleWithLocalizedFonts(projectDir);
+  const bundled = await bundleWithLocalizedFonts(projectDir);
+  const html = opts.variables
+    ? (await import("@hyperframes/studio-server")).injectPreviewVariables(bundled, opts.variables)
+    : bundled;
   const server = await serveStaticProjectHtml(projectDir, html, undefined, [], opts.autoProxy);
 
   const savedPaths: string[] = [];
@@ -503,6 +521,7 @@ async function captureSnapshots(
 
     try {
       if (renderReadyTimedOut) warnings.push("Render readiness timed out");
+      opts.onReady?.({ renderReadyTimedOut });
       // Font verification — split into loaded / errored / unused. Only status
       // "error" is a real failure; a face still "unloaded"/"loading" after
       // document.fonts.ready + the settle wait was simply never requested by any
@@ -531,9 +550,9 @@ async function captureSnapshots(
         const parts = [`${fontReport.loaded.length} loaded`];
         if (fontReport.errored.length > 0) parts.push(`${fontReport.errored.length} failed`);
         if (fontReport.unused.length > 0) parts.push(`${fontReport.unused.length} unused`);
-        console.log(`\n   ${c.dim("Fonts:")} ${parts.join(", ")}`);
+        log(`\n   ${c.dim("Fonts:")} ${parts.join(", ")}`);
         if (fontReport.errored.length > 0) {
-          console.log(`   ${c.error("Fonts FAILED:")} ${fontReport.errored.join(", ")}`);
+          log(`   ${c.error("Fonts FAILED:")} ${fontReport.errored.join(", ")}`);
         }
       }
 
@@ -584,11 +603,11 @@ async function captureSnapshots(
             includeEnd: opts.includeEnd,
           });
       if (range)
-        console.log(
+        log(
           `   Sampling ${positions.length} frames within ${range[0]}–${range[1]}s${opts.composition ? ` (composition ${opts.composition})` : ""}`,
         );
       if (appendedTail) {
-        console.log(
+        log(
           `   ${c.dim(`Note: added an end-of-timeline frame at ${positions[positions.length - 1]!.toFixed(2)}s. Short beats between your --at times may still be skipped — pass them explicitly.`)}`,
         );
       }
@@ -887,6 +906,7 @@ async function captureSnapshots(
         // Only the capture itself is a "snapshot": the reference frame and the
         // pair sheet are derived artifacts, like contact-sheet.jpg, so they stay
         // out of savedPaths (count, listing, and --describe all read it).
+        await opts.onFrame?.(page, time);
         const rel = relative(projectDir, framePath);
         savedPaths.push(rel.startsWith("..") || isAbsolute(rel) ? framePath : rel);
       }
@@ -906,7 +926,7 @@ async function captureSnapshots(
           completed,
         )
       : false;
-    if (!recorded) {
+    if (!recorded && record) {
       const paths = [...replaced, ...artifacts.map((artifact) => artifact.image)];
       if (paths.length > 0) await forgetRecordedArtifacts(projectDir, paths).catch(() => undefined);
     }
@@ -1013,6 +1033,15 @@ export default defineCommand({
       description:
         "Reference video (e.g. footage being rebuilt): also save its frame at each captured time and a render|reference pair sheet",
     },
+    variables: {
+      type: "string",
+      description:
+        'JSON object of variable values, merged over the composition\'s data-composition-variables defaults, as with render. Example: --variables \'{"title":"Hello"}\'',
+    },
+    "variables-file": {
+      type: "string",
+      description: "Path to a JSON file with variable values (alternative to --variables)",
+    },
     describe: {
       type: "string",
       description:
@@ -1068,6 +1097,10 @@ export default defineCommand({
       failCommand();
     }
     const timeout = parseInt(args.timeout as string, 10) || 5000;
+    const variables = resolveVariablesArg(
+      args.variables as string | undefined,
+      args["variables-file"] as string | undefined,
+    );
     const atTimestamps = args.at
       ? String(args.at)
           .split(",")
@@ -1122,6 +1155,7 @@ export default defineCommand({
           autoProxy: args.proxy as boolean | undefined,
           browserGpuMode: resolveLocalBrowserGpuMode(args["browser-gpu"] as boolean | undefined),
           against,
+          variables,
         });
         reportArtifacts(
           "snapshot",

@@ -112,12 +112,26 @@ export function loadSeries(dir) {
   } catch (error) {
     throw new Error(`${SERIES_FILE} illisible : ${error.message}`);
   }
-  const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
+  return checkSeriesRows(Array.isArray(parsed) ? parsed : parsed?.rows);
+}
+
+/** `rows` itself when it is 1 to MAX_SERIES objects of variable values. */
+export function checkSeriesRows(rows) {
   if (!Array.isArray(rows) || rows.length === 0) throw new Error(`${SERIES_FILE} ne contient aucune version.`);
   const bad = rows.findIndex((row) => typeof row !== "object" || row === null || Array.isArray(row));
   if (bad !== -1) throw new Error(`${SERIES_FILE} : la version ${bad + 1} n'est pas un objet de variables.`);
   if (rows.length > MAX_SERIES) throw new Error(`${rows.length} versions : ${MAX_SERIES} au plus par série.`);
   return rows;
+}
+
+export function writeSeries(dir, rows) {
+  writeFileSync(join(dir, SERIES_FILE), `${JSON.stringify({ rows: checkSeriesRows(rows) }, null, 2)}\n`);
+}
+
+/** Keys of the rows that the template does not declare, so the render would ignore them. */
+export function unknownSeriesKeys(rows, variables) {
+  const declared = new Set(["name", ...variables.map((variable) => variable.id)]);
+  return [...new Set(rows.flatMap((row) => Object.keys(row)))].filter((key) => !declared.has(key));
 }
 
 export function seriesCount(dir) {

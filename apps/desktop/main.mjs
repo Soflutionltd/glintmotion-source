@@ -41,6 +41,7 @@ import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
 import { createPersistentMap, takeResume, writeResume } from "./session-state.mjs";
 import {
+  checkSeriesRows,
   copyTemplate,
   readTemplates,
   readVariables,
@@ -49,6 +50,8 @@ import {
   setTemplate,
   splitBriefs,
   templatePrompt,
+  unknownSeriesKeys,
+  writeSeries,
 } from "./templates.mjs";
 import { createUpdater } from "./updater.mjs";
 import { createWhatsNew } from "./whats-new.mjs";
@@ -314,6 +317,25 @@ async function startFromTemplate(request) {
   await openStudio(dirs[0]);
 }
 
+/** A series project written straight from rows of variable values (an agent's glintmotion_create_series). */
+function createSeriesFromRows({ template, rows, name }) {
+  const source = readTemplates(templatesFile()).find((dir) => dir === template || basename(dir) === template);
+  if (!source) throw new Error(`No template "${template}". glintmotion_list_templates lists them.`);
+  const variables = readVariables(source);
+  if (variables.length === 0) {
+    throw new Error(`${basename(source)} declares no data-composition-variables, so a series cannot vary it.`);
+  }
+  checkSeriesRows(rows);
+  const parent = DEFAULT_PROJECTS_DIR;
+  mkdirSync(parent, { recursive: true });
+  const idea = String(name ?? "").trim() || `${basename(source)} série`;
+  const dir = join(parent, projectNameFor({ site: null, idea, parent }));
+  copyTemplate(source, dir);
+  writeSeries(dir, rows);
+  rememberProject(dir);
+  return { dir, unknown: unknownSeriesKeys(rows, variables) };
+}
+
 /** Home's prompt box (`text` alone) or the four-part card (`picks` plus a site or an idea). */
 async function startFromHome(request) {
   const resolution = checkResolution(request?.resolution);
@@ -329,7 +351,8 @@ async function startFromHome(request) {
 
 ipcMain.handle("home:firstVideoParts", () => FIRST_VIDEO_PARTS);
 ipcMain.handle("home:start", (_event, request) => startFromHome(request));
-ipcMain.handle("templates:list", () => readTemplates(templatesFile()).map((dir) => projectInfo(dir, null)));
+const listTemplates = () => readTemplates(templatesFile()).map((dir) => projectInfo(dir, null));
+ipcMain.handle("templates:list", listTemplates);
 ipcMain.handle("templates:set", (_event, request) =>
   setTemplate(templatesFile(), String(request?.dir ?? ""), request?.on === true),
 );
@@ -372,6 +395,7 @@ const AGENT_SYSTEM_PROMPT = [
   "Glintmotion's own tools are there as MCP tools (mcp__glintmotion__*): studio_look and studio_inspect to find elements, the other studio_* tools to edit them live,",
   "glintmotion_contact_sheet to see the whole video, glintmotion_motion_check after animating text,",
   "and glintmotion_session begin/end around your changes so the person can undo them in one step.",
+  "In a series project (series.json, one row of variables per version), glintmotion_series_sheet shows every version side by side.",
 ].join(" ");
 const AGENT_ALLOWED_TOOLS = [
   "Bash(npm run check)",
@@ -384,6 +408,7 @@ const AGENT_ALLOWED_TOOLS = [
 const AGENT_BLOCKED_TOOLS = [
   "glintmotion_open_project",
   "glintmotion_create_project",
+  "glintmotion_create_series",
   "glintmotion_render",
   "glintmotion_render_cancel",
   "glintmotion_deliver",
@@ -680,6 +705,8 @@ function startMcp() {
       deliver: (request) => trackDelivery(deliverRender({ projectDir: agentProjectDir(), ...request })),
       createProject,
       defaultParent: DEFAULT_PROJECTS_DIR,
+      listTemplates: () => listTemplates().map((info) => ({ ...info, variables: readVariables(info.path) })),
+      createSeries: createSeriesFromRows,
     },
   });
   mcp = { url: server.url, token, error: null };

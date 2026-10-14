@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
+import { MAX_SERIES, SERIES_FILE } from "./templates.mjs";
 
 /** Engine commands an agent may run. Rendering has its own job tool; the rest open UIs, accounts or the network. */
 export const CLI_COMMANDS = [
@@ -34,6 +35,7 @@ const OUTPUT_TAIL = 30_000;
 const RENDER_WAIT_S = 50;
 const MAX_WAIT_S = 600;
 const MAX_SHEET_FRAMES = 24;
+const MAX_SERIES_TIMES = 8;
 const MOTION_TWEENS = 120;
 const MAX_MOTION_TWEENS = 400;
 const FRAME_FETCH_PARALLEL = 3;
@@ -181,6 +183,10 @@ export const AGENT_TOOLS = [
           description:
             "First rewrite the project files to apply the findings marked fixable (eases that freeze text, text scale origin, will-change on scaled text). Call inside a glintmotion_session so it can be undone.",
         },
+        variables: {
+          type: "object",
+          description: "Check with these variable values, e.g. one row of series.json, so a long headline is caught before export.",
+        },
       },
     },
   },
@@ -267,7 +273,8 @@ export const AGENT_TOOLS = [
       "Export the open project with the Glintmotion engine, as a background job.",
       `Waits up to wait_seconds (default ${RENDER_WAIT_S}) and returns the output path if it finished,`,
       "otherwise the job id and progress: then call glintmotion_render_status. One render at a time.",
-      "`variables` fills the composition's data-composition-variables; `batch` renders one file per row.",
+      "`variables` fills the composition's data-composition-variables; `batch` renders one file per row;",
+      `\`series: true\` renders the project's ${SERIES_FILE}, one file per version named after its \`name\`.`,
     ].join(" "),
     inputSchema: {
       type: "object",
@@ -288,6 +295,7 @@ export const AGENT_TOOLS = [
           items: { type: "object" },
           description: "Variable rows; outputs land in renders/<project>_<stamp>/<index>.<format>.",
         },
+        series: { type: "boolean", description: `Render ${SERIES_FILE} instead of \`batch\`.` },
         wait_seconds: { type: "number", minimum: 0, maximum: MAX_WAIT_S },
       },
     },
@@ -342,6 +350,61 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "glintmotion_list_templates",
+    description: [
+      "The projects the person marked as templates, with size, duration and the variables each declares",
+      "(id, type, label, default, options). A template with variables can become a series.",
+    ].join(" "),
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "glintmotion_create_series",
+    description: [
+      "Make a series from a template that declares variables: a copy of the template whose",
+      `${SERIES_FILE} holds one row of variable values per version, opened in the studio. The design stays`,
+      "the template's; only the variables change. Then glintmotion_series_sheet, glintmotion_check with",
+      "each row's variables, and glintmotion_render with series: true.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        template: { type: "string", description: "A template's path or folder name from glintmotion_list_templates." },
+        rows: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_SERIES,
+          items: { type: "object" },
+          description:
+            "One object per version: a short unique `name` (it names the exported file) plus only the variables that change. Empty text variables keep the template's text.",
+        },
+        name: { type: "string", description: "Project folder name. Default '<template> série'." },
+        open: { type: "boolean", default: true },
+      },
+      required: ["template", "rows"],
+    },
+  },
+  {
+    name: "glintmotion_series_sheet",
+    description: [
+      `One image comparing every version of the open series project (${SERIES_FILE}) at the same times: one row`,
+      "per version, one column per time. Also lists `repeated`: lines of copy shown in several versions but",
+      "not all, which usually means two versions say the same thing. Saved under snapshots/.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        at: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_SERIES_TIMES,
+          items: { type: "number", minimum: 0 },
+          description: "Times (s) when the texts that vary are on screen.",
+        },
+      },
+      required: ["at"],
+    },
+  },
+  {
     name: "glintmotion_cli",
     description: [
       "Run a Glintmotion engine command in the open project (or `dir`) and return its output, parsed when",
@@ -373,6 +436,7 @@ export const MCP_INSTRUCTIONS = [
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
   "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
+  "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
@@ -391,6 +455,8 @@ export const MCP_INSTRUCTIONS = [
  *   createProject: (request: { name: string, parent: string, resolution: string }) => Promise<string>,
  *   openProject: (dir: string) => Promise<void>,
  *   defaultParent: string,
+ *   listTemplates: () => object[],
+ *   createSeries: (request: { template: string, rows: unknown, name?: string }) => { dir: string, unknown: string[] },
  *   renders: ReturnType<typeof import("./render-jobs.mjs").createRenderJobs>,
  * }} app
  */
@@ -460,11 +526,17 @@ export function createAgentTools(app) {
     return run.code === 0 ? reply : { ...reply, isError: true };
   }
 
-  async function check({ strict, at, fix }) {
+  async function check({ strict, at, fix, variables }) {
     const dir = app.projectDir();
     const args = ["check", dir, "--json"];
     if (strict) args.push("--strict");
     if (fix) args.push("--fix");
+    if (variables !== undefined) {
+      if (typeof variables !== "object" || variables === null || Array.isArray(variables)) {
+        return failure("variables must be an object of variable values.");
+      }
+      args.push("--variables", JSON.stringify(variables));
+    }
     if (Array.isArray(at) && at.length) args.push("--at", at.map(Number).filter(Number.isFinite).join(","));
     const run = await runCaptured(args, dir, 300);
     const report = parseJson(run.stdout);
@@ -707,6 +779,42 @@ export function createAgentTools(app) {
     return text({ uploaded: basename(path), bytes: bytes.byteLength, contentType });
   }
 
+  async function createSeries({ template, rows, name, open }) {
+    const { dir, unknown } = app.createSeries({ template: String(template ?? ""), rows, name });
+    if (open !== false) await app.openProject(dir);
+    return text({
+      path: dir,
+      versions: rows.length,
+      opened: open !== false,
+      ...(unknown.length && { ignored: unknown, hint: "The template declares no variable with these ids." }),
+    });
+  }
+
+  async function seriesSheet({ at }) {
+    const dir = app.projectDir();
+    if (!existsSync(join(dir, SERIES_FILE))) {
+      return failure(`The open project has no ${SERIES_FILE}. Make one with glintmotion_create_series.`);
+    }
+    const times = Array.isArray(at) ? at.map(Number) : [];
+    if (times.length === 0 || times.length > MAX_SERIES_TIMES || times.some((time) => !Number.isFinite(time) || time < 0)) {
+      return failure(`at must be 1 to ${MAX_SERIES_TIMES} non-negative times in seconds.`);
+    }
+    mkdirSync(join(dir, "snapshots"), { recursive: true });
+    const output = join(dir, "snapshots", `series_${stamp()}.jpg`);
+    const args = ["compare", dir, "--batch", join(dir, SERIES_FILE), "--at", times.join(","), "--out", output, "--json"];
+    const run = await runCaptured(args, dir, 300);
+    const report = parseJson(run.stdout);
+    if (run.code !== 0 || !existsSync(output)) {
+      return failure(`The series sheet failed (code ${run.code}). ${tail(run.stderr.trim() || run.stdout.trim(), 1500)}`);
+    }
+    return {
+      content: [
+        { type: "text", text: JSON.stringify({ output, times: report?.times ?? times, repeated: report?.repeated ?? [] }) },
+        image(readFileSync(output), "image/jpeg"),
+      ],
+    };
+  }
+
   function renderReply(job) {
     const reply = text(
       job.status === "running"
@@ -739,6 +847,9 @@ export function createAgentTools(app) {
     glintmotion_render_cancel: ({ job }) => text(app.renders.cancel(job)),
     glintmotion_deliver: deliver,
     glintmotion_upload: upload,
+    glintmotion_list_templates: () => text(app.listTemplates()),
+    glintmotion_create_series: createSeries,
+    glintmotion_series_sheet: seriesSheet,
     glintmotion_cli: cli,
   };
 

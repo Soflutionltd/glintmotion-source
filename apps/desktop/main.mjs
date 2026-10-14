@@ -219,7 +219,8 @@ async function goHome(action) {
   stopStudio();
   rendererBusy = false;
   win.setTitle(APP_NAME);
-  await win.loadFile(join(here, "ui", "index.html"), action === "new" ? { hash: "new" } : {});
+  const hash = action === "new" || action === "tour" ? { hash: action } : {};
+  await win.loadFile(join(here, "ui", "index.html"), hash);
 }
 
 function createProject({ name, parent, resolution }) {
@@ -989,6 +990,10 @@ function buildMenu() {
         {
           label: "Quoi de neuf dans Glintmotion",
           click: () => whatsNew.showAll().catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
+        },
+        {
+          label: "Visite guidée",
+          click: () => goHome("tour").catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
         },
       ],
     },

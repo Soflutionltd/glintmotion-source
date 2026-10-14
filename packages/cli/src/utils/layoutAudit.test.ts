@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLayoutSampleTimes,
+  buildTextSettledSampleTimes,
   buildTransitionSampleTimes,
   computeOverflow,
   overflowValueClips,
@@ -60,6 +61,67 @@ describe("buildTransitionSampleTimes (#1380)", () => {
 
   it("merges with even-spacing samples into one deduplicated ascending list", () => {
     expect(mergeSampleTimes([1, 3, 5], [3, 2.5, 7])).toEqual([1, 2.5, 3, 5, 7]);
+  });
+});
+
+describe("buildTextSettledSampleTimes", () => {
+  it("samples the middle of each pause between a text's tweens, and just after its last one", () => {
+    // A headline arrives 0.45–1.3, leaves 2.75–3.13; a label only arrives 0.5–1.0,
+    // so its rest waits for the headline to land.
+    const times = buildTextSettledSampleTimes({
+      duration: 10,
+      cap: 24,
+      frame: 0.04,
+      spans: [
+        { start: 0.45, end: 1.3, textTargets: [1] },
+        { start: 2.75, end: 3.13, textTargets: [1] },
+        { start: 0.5, end: 1.0, textTargets: [2] },
+        { start: 0, end: 10, textTargets: [] },
+      ],
+    });
+    expect(times).toEqual([1.34, 2.025, 3.17]);
+  });
+
+  it("skips pauses shorter than three frames and times outside the composition", () => {
+    const times = buildTextSettledSampleTimes({
+      duration: 2,
+      cap: 24,
+      frame: 0.04,
+      spans: [
+        { start: 0, end: 1, textTargets: [1] },
+        { start: 1.05, end: 1.98, textTargets: [1] },
+      ],
+    });
+    // 1.0→1.05 is under three frames; 1.98 + one frame lands past the end.
+    expect(times).toEqual([]);
+  });
+
+  it("finds no rest after a tween that hides the text, until it comes back", () => {
+    // Arrives 0–1, slides out 3–3.5, comes back 6–7, leaves for good 9–9.5.
+    const times = buildTextSettledSampleTimes({
+      duration: 12,
+      cap: 24,
+      frame: 0.04,
+      spans: [
+        { start: 0, end: 1, textTargets: [1] },
+        { start: 3, end: 3.5, textTargets: [1], hides: true },
+        { start: 6, end: 7, textTargets: [1] },
+        { start: 9, end: 9.5, textTargets: [1], hides: true },
+      ],
+    });
+    expect(times).toEqual([2, 8]);
+  });
+
+  it("strides evenly down to the cap, keeping the first and last rest", () => {
+    const spans = Array.from({ length: 40 }, (_, i) => ({
+      start: i * 0.2,
+      end: i * 0.2 + 0.1,
+      textTargets: [i],
+    }));
+    const times = buildTextSettledSampleTimes({ duration: 10, cap: 8, frame: 0.01, spans });
+    expect(times.length).toBe(8);
+    expect(times[0]).toBeCloseTo(0.11, 3);
+    expect(times.at(-1)).toBeCloseTo(7.91, 3);
   });
 });
 

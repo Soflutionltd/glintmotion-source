@@ -458,6 +458,93 @@ export function buildTransitionSampleTimes({
   return { times, dropped: merged.length - times.length };
 }
 
+/** A GSAP tween on the root clock, with ids of the text-bearing elements it animates. */
+export interface TweenSpan {
+  start: number;
+  end: number;
+  textTargets: number[];
+  /** The tween leaves its targets hidden (faded out, slid out of their mask): no rest follows it. */
+  hides?: boolean;
+}
+
+export interface TextSettledSampleOptions {
+  duration: number;
+  spans: TweenSpan[];
+  cap: number;
+  /** One frame: how far past a text's last tween its resting state is sampled. */
+  frame?: number;
+}
+
+/**
+ * Times at which each animated text is at rest: the middle of every pause
+ * between two of its tweens (fully arrived, not yet leaving), and one frame
+ * after its last tween, unless that tween hid it. The even grid tends to land mid-entrance, where a
+ * masked line reads as overflowing and a fading one as low-contrast; these
+ * samples judge the text as the viewer reads it. Contrast measures every text
+ * on screen at once, so each rest moves to its first instant where no other
+ * text is mid-tween, when the rest has one. Evenly strided down to `cap`.
+ */
+export function buildTextSettledSampleTimes({
+  duration,
+  spans,
+  cap,
+  frame = 1 / 30,
+}: TextSettledSampleOptions): number[] {
+  if (!Number.isFinite(duration) || duration <= 0 || cap <= 0) return [];
+  const restTime = quietRestTime(spans, frame);
+  const settled = [...spansByTextTarget(spans).values()].flatMap((list) =>
+    textRestTimes(list, duration, frame, restTime),
+  );
+  const inRange = uniqueSortedTimes(settled.filter((time) => time >= 0 && time <= duration));
+  if (inRange.length <= cap) return inRange;
+  const stride = (i: number) => Math.floor((i * (inRange.length - 1)) / Math.max(1, cap - 1));
+  return uniqueSortedTimes(Array.from({ length: cap }, (_, i) => inRange[stride(i)] ?? 0));
+}
+
+type RestTime = (from: number, to: number, preferred: number) => number;
+
+function spansByTextTarget(spans: TweenSpan[]): Map<number, TweenSpan[]> {
+  const byTarget = new Map<number, TweenSpan[]>();
+  for (const span of spans) {
+    if (!Number.isFinite(span.start) || !Number.isFinite(span.end)) continue;
+    for (const target of span.textTargets) {
+      byTarget.set(target, [...(byTarget.get(target) ?? []), span]);
+    }
+  }
+  return byTarget;
+}
+
+/** First instant of a rest window where no text is mid-tween; `preferred` when there is none. */
+function quietRestTime(spans: TweenSpan[], frame: number): RestTime {
+  const busy = spans.filter((span) => span.textTargets.length > 0 && span.end > span.start);
+  const quiet = (time: number) => !busy.some((span) => span.start < time && time < span.end);
+  return (from, to, preferred) => {
+    const candidates = [preferred, from + frame, ...busy.map((span) => span.end + frame)];
+    return candidates.find((time) => time > from && time < to && quiet(time)) ?? preferred;
+  };
+}
+
+function textRestTimes(
+  spans: TweenSpan[],
+  duration: number,
+  frame: number,
+  restTime: RestTime,
+): number[] {
+  const list = [...spans].sort((a, b) => a.start - b.start);
+  const rests: number[] = [];
+  let restFrom = list[0]?.end ?? 0;
+  let hidden = list[0]?.hides === true;
+  for (const span of list.slice(1)) {
+    if (!hidden && span.start - restFrom >= frame * 3) {
+      rests.push(restTime(restFrom, span.start, (restFrom + span.start) / 2));
+    }
+    if (span.end >= restFrom) hidden = span.hides === true;
+    restFrom = Math.max(restFrom, span.end);
+  }
+  if (!hidden) rests.push(restTime(restFrom, duration, restFrom + frame));
+  return rests;
+}
+
 /** Merge sample-time lists into one deduplicated ascending list. */
 export function mergeSampleTimes(...lists: number[][]): number[] {
   return uniqueSortedTimes(lists.flat());

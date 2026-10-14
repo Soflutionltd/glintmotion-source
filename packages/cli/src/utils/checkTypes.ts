@@ -1,5 +1,5 @@
 import type { ProjectLintResult } from "./lintProject.js";
-import type { LayoutIssue, LayoutOverflow, LayoutRect } from "./layoutAudit.js";
+import type { LayoutIssue, LayoutOverflow, LayoutRect, TweenSpan } from "./layoutAudit.js";
 import type { Canvas, MotionFrame } from "./motionAudit.js";
 import type { MotionSpec } from "./motionSpec.js";
 import type { ProjectDir } from "./project.js";
@@ -13,6 +13,8 @@ export interface CheckOptions {
   at?: number[];
   atTransitions: boolean;
   maxTransitionSamples?: number;
+  /** Also sample each animated text at rest (between its tweens, after its last one). */
+  textSettled?: boolean;
   maxIssues: number;
   collapseStatic: boolean;
   tolerance: number;
@@ -194,6 +196,8 @@ export interface CheckAuditDriver {
   /** True when the root composition explicitly declares that it is intentionally timeline-free. */
   hasNoTimelineDeclaration(): Promise<boolean>;
   getTransitionBoundaries(): Promise<number[]>;
+  /** Every tween on the root clock with its text-bearing targets, for the text-at-rest samples. */
+  getTweenSpans?(): Promise<TweenSpan[]>;
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
   seek(time: number): Promise<void>;
@@ -246,6 +250,7 @@ export interface CheckBrowserResult {
   layoutSamples: number[];
   transitionSamples: number[];
   transitionSamplesDropped: number;
+  textSettledSamples: number[];
   runtimeFindings: CheckFinding[];
   layoutIssues: AnchoredLayoutIssue[];
   motionIssues: AnchoredLayoutIssue[];
@@ -291,6 +296,7 @@ export interface CheckReport {
     samples: number[];
     transitionSamples: number[];
     transitionSamplesDropped: number;
+    textSettledSamples: number[];
     tolerance: number;
     totalIssueCount: number;
     truncated: boolean;

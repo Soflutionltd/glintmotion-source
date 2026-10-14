@@ -182,6 +182,12 @@ const CHECK_COMMAND_ARGS = {
     description:
       "Optional cap on transition-derived samples; when it truncates, the omitted count is reported (default: unlimited)",
   },
+  "text-settled": {
+    type: "boolean",
+    description:
+      "Also sample each animated text at rest (between its tweens, just after its last), and judge contrast there (default: true; --no-text-settled to skip)",
+    default: true,
+  },
   "max-issues": {
     type: "string",
     description: "Maximum issues to print or return after static collapse (default: 80)",
@@ -325,6 +331,7 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     at: parseAt(args.at),
     atTransitions: args["at-transitions"] === true,
     maxTransitionSamples: maxTransitionSamples > 0 ? maxTransitionSamples : undefined,
+    textSettled: args["text-settled"] !== false,
     maxIssues: positiveInteger(args["max-issues"], DEFAULT_CHECK_OPTIONS.maxIssues),
     collapseStatic: args["collapse-static"] !== false,
     tolerance: nonNegativeNumber(args.tolerance, DEFAULT_CHECK_OPTIONS.tolerance),

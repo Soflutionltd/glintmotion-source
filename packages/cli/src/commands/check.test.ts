@@ -343,6 +343,31 @@ describe("contrast sample selection", () => {
     ]);
     expect(selectContrastTimes([1, 2, 3])).toEqual([1, 2, 3]);
   });
+
+  it("judges contrast where each animated text has settled", async () => {
+    const driver = fakeDriver({
+      getTweenSpans: async () => [
+        { start: 0.5, end: 1, textTargets: [1] },
+        { start: 4, end: 4.5, textTargets: [1] },
+        { start: 2, end: 2.6, textTargets: [2] },
+        { start: 3, end: 6, textTargets: [] },
+      ],
+    });
+    const { report } = await runScenario(driver);
+    // Text 1 rests 1–4, but text 2 is mid-tween at the 2.5 midpoint.
+    expect(report.layout.textSettledSamples).toEqual([1.033, 2.633, 4.533]);
+    expect(report.contrast.samples).toEqual([1.033, 2.633, 4.533]);
+    expect(report.layout.samples).toEqual(expect.arrayContaining([1.033, 2.633, 4.533]));
+  });
+
+  it("keeps the even contrast grid when the text-at-rest pass is off", async () => {
+    const driver = fakeDriver({
+      getTweenSpans: async () => [{ start: 0.5, end: 1, textTargets: [1] }],
+    });
+    const { report } = await runScenario(driver, { textSettled: false });
+    expect(report.layout.textSettledSamples).toEqual([]);
+    expect(report.contrast.samples).toEqual([0.5, 2.5, 4.5, 6.5, 8.5]);
+  });
 });
 
 it("parses the caption-zone grammar and enables the frame gate", async () => {
@@ -1086,6 +1111,7 @@ function reportWithFindings(overrides: Partial<CheckReport> = {}): CheckReport {
       samples: [],
       transitionSamples: [],
       transitionSamplesDropped: 0,
+      textSettledSamples: [],
       tolerance: 2,
       totalIssueCount: 0,
       truncated: false,

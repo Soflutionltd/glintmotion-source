@@ -22,7 +22,7 @@ import {
 import { loadBrowserScript } from "../commands/layout.js";
 import { normalizeErrorMessage } from "./errorMessage.js";
 import { ambiguousIssue, type MotionFrame } from "./motionAudit.js";
-import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js";
+import type { LayoutIssue, LayoutIssueCode, LayoutRect, TweenSpan } from "./layoutAudit.js";
 import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
 import { resolveAutoProxy } from "./projectConfig.js";
@@ -533,6 +533,7 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     getDuration: () => getCompositionDuration(page),
     hasNoTimelineDeclaration: () => hasNoTimelineDeclaration(page),
     getTransitionBoundaries: () => collectTweenBoundaries(page),
+    getTweenSpans: () => collectTweenSpans(page),
     getCanvas: () =>
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
     findAmbiguousSelectors: (selectors) => findAmbiguousSelectors(page, selectors),
@@ -608,6 +609,11 @@ async function getCompositionDuration(page: Page): Promise<number> {
 }
 
 async function collectTweenBoundaries(page: Page): Promise<number[]> {
+  const spans = await collectTweenSpans(page);
+  return spans.flatMap((span) => [span.start, span.end]).filter(Number.isFinite);
+}
+
+async function collectTweenSpans(page: Page): Promise<TweenSpan[]> {
   // GSAP getter binding and parent-time conversion form one serialized algorithm.
   // fallow-ignore-next-line complexity
   return page.evaluate(() => {
@@ -630,9 +636,34 @@ async function collectTweenBoundaries(page: Page): Promise<number[]> {
       }
       return time;
     };
+    const textIds = new Map<Element, number>();
+    const textTargets = (tween: unknown): number[] => {
+      const targetsOf = property(tween, "targets");
+      if (typeof targetsOf !== "function") return [];
+      const targets = Reflect.apply(targetsOf, tween, []);
+      if (!Array.isArray(targets)) return [];
+      return targets.flatMap((target) => {
+        if (!(target instanceof Element) || !target.textContent?.trim()) return [];
+        const id = textIds.get(target) ?? textIds.size + 1;
+        textIds.set(target, id);
+        return [id];
+      });
+    };
+    // Destination values that leave a target unreadable: faded out, shrunk away, or slid a full
+    // box out of the mask that reveals it.
+    const hides = (tween: unknown): boolean => {
+      const vars = property(tween, "vars");
+      const numeric = (key: string): number | undefined => {
+        const value = property(vars, key);
+        return typeof value === "number" ? value : undefined;
+      };
+      if (numeric("opacity") === 0 || numeric("autoAlpha") === 0 || numeric("scale") === 0)
+        return true;
+      return Math.abs(numeric("yPercent") ?? 0) >= 100 || Math.abs(numeric("xPercent") ?? 0) >= 100;
+    };
     const timelines = Reflect.get(window, "__timelines");
     if (typeof timelines !== "object" || timelines === null) return [];
-    const boundaries: number[] = [];
+    const spans: { start: number; end: number; textTargets: number[]; hides: boolean }[] = [];
     for (const key of Object.keys(timelines)) {
       const timeline = Reflect.get(timelines, key);
       const getChildren = property(timeline, "getChildren");
@@ -643,13 +674,18 @@ async function collectTweenBoundaries(page: Page): Promise<number[]> {
         for (const child of children) {
           const duration = numberCall(child, "duration", Number.NaN);
           if (!Number.isFinite(duration)) continue;
-          boundaries.push(rootTime(timeline, child, 0), rootTime(timeline, child, duration));
+          spans.push({
+            start: rootTime(timeline, child, 0),
+            end: rootTime(timeline, child, duration),
+            textTargets: textTargets(child),
+            hides: hides(child),
+          });
         }
       } catch {
         continue;
       }
     }
-    return boundaries.filter(Number.isFinite);
+    return spans;
   });
 }
 

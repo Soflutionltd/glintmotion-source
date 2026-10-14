@@ -9,6 +9,7 @@ import type { ProjectDir } from "./project.js";
 import { lintProject, shouldBlockRender, type ProjectLintResult } from "./lintProject.js";
 import {
   buildLayoutSampleTimes,
+  buildTextSettledSampleTimes,
   buildTransitionSampleTimes,
   collapseStaticLayoutIssues,
   longestContiguousRunMs,
@@ -85,6 +86,7 @@ const FRAME_BREACH_FLOOR_FRACTION = 0.06;
 export const DEFAULT_CHECK_OPTIONS: CheckOptions = {
   samples: 9,
   atTransitions: false,
+  textSettled: true,
   maxIssues: 80,
   collapseStatic: true,
   tolerance: 2,
@@ -95,13 +97,24 @@ export const DEFAULT_CHECK_OPTIONS: CheckOptions = {
   browserGpuMode: "auto",
 };
 
-/** Pick at most five evenly-strided points from the already-merged layout grid. */
-export function selectContrastTimes(grid: number[]): number[] {
-  if (grid.length <= 5) return [...grid];
-  return Array.from({ length: 5 }, (_, index) => {
-    const selected = Math.floor((index * (grid.length - 1)) / 4);
+// Text-at-rest samples: enough for every headline of a short social video, bounded for long ones.
+const TEXT_SETTLED_MAX_SAMPLES = 24;
+const CONTRAST_SETTLED_MAX_SAMPLES = 8;
+
+/** Pick at most `count` evenly-strided points from an ascending sample list. */
+export function selectContrastTimes(grid: number[], count = 5): number[] {
+  if (grid.length <= count) return [...grid];
+  return Array.from({ length: count }, (_, index) => {
+    const selected = Math.floor((index * (grid.length - 1)) / (count - 1));
     return grid[selected] ?? grid[0] ?? 0;
   });
+}
+
+/** Contrast judges text as it is read: at rest when those times are known, else the even grid. */
+function contrastTimes(auditSamples: number[], textSettled: number[]): number[] {
+  return textSettled.length > 0
+    ? selectContrastTimes(textSettled, CONTRAST_SETTLED_MAX_SAMPLES)
+    : selectContrastTimes(auditSamples);
 }
 
 function buildMotionSampleTimes(duration: number): number[] {
@@ -120,6 +133,7 @@ interface SampleGrid {
   frameSamples: number[];
   transitionSamples: number[];
   transitionSamplesDropped: number;
+  textSettledSamples: number[];
   contrastSamples: number[];
 }
 
@@ -171,6 +185,19 @@ function layoutSamplesInRange(options: CheckOptions, duration: number) {
   return { inRange, baseSamples };
 }
 
+async function textSettledSamples(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  duration: number,
+): Promise<number[]> {
+  if (!options.textSettled || options.at?.length || !driver.getTweenSpans) return [];
+  return buildTextSettledSampleTimes({
+    duration,
+    spans: await driver.getTweenSpans(),
+    cap: TEXT_SETTLED_MAX_SAMPLES,
+  });
+}
+
 async function buildSampleGrid(
   driver: CheckAuditDriver,
   options: CheckOptions,
@@ -197,7 +224,10 @@ async function buildSampleGrid(
     options.range,
   );
   transitions.times = transitions.times.filter(inRange);
-  const auditSamples = mergeSampleTimes(baseSamples, transitions.times).filter(inRange);
+  const textSettled = (await textSettledSamples(driver, options, duration)).filter(inRange);
+  const auditSamples = mergeSampleTimes(baseSamples, transitions.times, textSettled).filter(
+    inRange,
+  );
   const layoutSamples = mergeSampleTimes(auditSamples, captionSamples, frameSamples).filter(
     inRange,
   );
@@ -212,7 +242,8 @@ async function buildSampleGrid(
     frameSamples,
     transitionSamples: transitions.times,
     transitionSamplesDropped: transitions.dropped,
-    contrastSamples: options.contrast ? selectContrastTimes(auditSamples) : [],
+    textSettledSamples: textSettled,
+    contrastSamples: options.contrast ? contrastTimes(auditSamples, textSettled) : [],
   };
 }
 
@@ -1201,6 +1232,7 @@ export async function runAuditGrid(
     layoutSamples: grid.layoutSamples,
     transitionSamples: grid.transitionSamples,
     transitionSamplesDropped: grid.transitionSamplesDropped,
+    textSettledSamples: grid.textSettledSamples,
     runtimeFindings: [],
     layoutIssues: [
       ...collected.layoutIssues,
@@ -1605,6 +1637,7 @@ function shapeLayoutSection(
     samples: browser.layoutSamples,
     transitionSamples: browser.transitionSamples,
     transitionSamplesDropped: browser.transitionSamplesDropped,
+    textSettledSamples: browser.textSettledSamples,
     tolerance: options.tolerance,
     totalIssueCount: shaped.totalIssueCount,
     truncated: shaped.truncated,
@@ -1667,6 +1700,7 @@ function emptyBrowserResult(): CheckBrowserResult {
     layoutSamples: [],
     transitionSamples: [],
     transitionSamplesDropped: 0,
+    textSettledSamples: [],
     runtimeFindings: [],
     layoutIssues: [],
     motionIssues: [],

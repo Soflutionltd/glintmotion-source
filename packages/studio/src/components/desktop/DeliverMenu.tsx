@@ -1,9 +1,9 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { memo, useState } from "react";
 import { ShareNetwork } from "@phosphor-icons/react";
 import type { DeliveryPreset } from "../../utils/desktopHost";
 import { getDesktopHost, hostErrorMessage } from "../../utils/desktopHost";
-import { useCloseOnOutside } from "./useCloseOnOutside";
+import { AnchoredPopover } from "./AnchoredPopover";
+import { useAnchoredPopover } from "./useAnchoredPopover";
 
 const COLOR_STORAGE_KEY = "glintmotion.deliverColor";
 
@@ -23,22 +23,10 @@ function savedColor(): string {
 /** Re-encodes a finished render for Instagram and TikTok through the Glintmotion Mac app. */
 export const DeliverMenu = memo(function DeliverMenu({ filename }: { filename: string }) {
   const host = getDesktopHost();
-  const [open, setOpen] = useState(false);
+  const popover = useAnchoredPopover();
   const [color, setColor] = useState(savedColor);
   const [running, setRunning] = useState<DeliveryPreset | null>(null);
   const [result, setResult] = useState<{ text: string; file: string | null } | null>(null);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  const roots = useMemo(() => [buttonRef, menuRef], []);
-  useCloseOnOutside(open, roots, close);
-
-  const toggle = () => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) setAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    setOpen((value) => !value);
-  };
 
   if (!host) return null;
 
@@ -66,11 +54,11 @@ export const DeliverMenu = memo(function DeliverMenu({ filename }: { filename: s
   return (
     <div onClick={(event) => event.stopPropagation()}>
       <button
-        ref={buttonRef}
+        ref={popover.buttonRef}
         type="button"
-        onClick={toggle}
+        onClick={popover.toggle}
         aria-haspopup="dialog"
-        aria-expanded={open}
+        aria-expanded={popover.open}
         aria-label={`Export ${filename} for social media`}
         title="Export for social media"
         className="flex h-6 w-6 items-center justify-center rounded-md text-text-4 transition-colors hover:bg-hover hover:text-text-2"
@@ -78,59 +66,52 @@ export const DeliverMenu = memo(function DeliverMenu({ filename }: { filename: s
         <ShareNetwork size={13} aria-hidden="true" />
       </button>
 
-      {open &&
-        anchor &&
-        createPortal(
-          <div
-            ref={menuRef}
-            role="dialog"
-            aria-label="Export for social media"
-            style={{ top: anchor.top, right: anchor.right }}
-            onClick={(event) => event.stopPropagation()}
-            className="fixed z-[1000] w-60 rounded-xl border border-panel-border bg-panel-bg p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_12px_40px_rgba(0,0,0,0.06)]"
+      <AnchoredPopover
+        popover={popover}
+        label="Export for social media"
+        className="w-60"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
+          HEVC, sound levelled for Instagram (-14 LUFS). You choose where it is saved.
+        </p>
+        {PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            disabled={running !== null}
+            onClick={() => void deliver(preset.id)}
+            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-panel-text-1 transition-colors hover:bg-panel-input disabled:opacity-40"
           >
-            <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
-              HEVC, sound levelled for Instagram (-14 LUFS). You choose where it is saved.
-            </p>
-            {PRESETS.map((preset) => (
+            <span>{running === preset.id ? "Exporting…" : preset.label}</span>
+            <span className="text-[10px] text-panel-text-3">{preset.hint}</span>
+          </button>
+        ))}
+        <label className="mt-1 flex items-center justify-between gap-2 border-t border-panel-border px-2 pt-2 pb-1 text-[11px] text-panel-text-2">
+          Margin colour
+          <input
+            type="color"
+            value={color}
+            onChange={(event) => changeColor(event.target.value)}
+            aria-label="Margin colour"
+            className="h-6 w-10 cursor-pointer rounded border border-panel-border bg-transparent"
+          />
+        </label>
+        {result && (
+          <div className="flex items-center justify-between gap-2 px-2 pt-1.5 pb-1 text-[10px] text-panel-text-3">
+            <span className="min-w-0 break-words">{result.text}</span>
+            {result.file && (
               <button
-                key={preset.id}
                 type="button"
-                disabled={running !== null}
-                onClick={() => void deliver(preset.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-panel-text-1 transition-colors hover:bg-panel-input disabled:opacity-40"
+                onClick={() => void host.deliver.reveal(result.file as string)}
+                className="shrink-0 text-studio-accent hover:underline"
               >
-                <span>{running === preset.id ? "Exporting…" : preset.label}</span>
-                <span className="text-[10px] text-panel-text-3">{preset.hint}</span>
+                Show
               </button>
-            ))}
-            <label className="mt-1 flex items-center justify-between gap-2 border-t border-panel-border px-2 pt-2 pb-1 text-[11px] text-panel-text-2">
-              Margin colour
-              <input
-                type="color"
-                value={color}
-                onChange={(event) => changeColor(event.target.value)}
-                aria-label="Margin colour"
-                className="h-6 w-10 cursor-pointer rounded border border-panel-border bg-transparent"
-              />
-            </label>
-            {result && (
-              <div className="flex items-center justify-between gap-2 px-2 pt-1.5 pb-1 text-[10px] text-panel-text-3">
-                <span className="min-w-0 break-words">{result.text}</span>
-                {result.file && (
-                  <button
-                    type="button"
-                    onClick={() => void host.deliver.reveal(result.file as string)}
-                    className="shrink-0 text-studio-accent hover:underline"
-                  >
-                    Show
-                  </button>
-                )}
-              </div>
             )}
-          </div>,
-          document.body,
+          </div>
         )}
+      </AnchoredPopover>
     </div>
   );
 });

@@ -1,5 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { memo, useEffect, useRef, useState } from "react";
 import { CircleNotch, Pulse } from "@phosphor-icons/react";
 import { useStudioPlaybackContext, useStudioShellContext } from "../../contexts/StudioContext";
 import { usePlayerStore } from "../../player/store/playerStore";
@@ -9,7 +8,8 @@ import { Tooltip } from "../ui/Tooltip";
 import { flatActive, flatIdle } from "../timelineToolbarStyles";
 import type { MotionCheckReport, MotionIssue } from "../../utils/desktopHost";
 import { getDesktopHost, hostErrorMessage } from "../../utils/desktopHost";
-import { useCloseOnOutside } from "./useCloseOnOutside";
+import { AnchoredPopover } from "./AnchoredPopover";
+import { useAnchoredPopover } from "./useAnchoredPopover";
 
 const ISSUE_LABELS: Record<MotionIssue, string> = {
   late_start: "Starts late",
@@ -46,14 +46,8 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
   const { refreshKey } = useStudioPlaybackContext();
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const popover = useAnchoredPopover();
   const refreshKeyRef = useRef(refreshKey);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  const roots = useMemo(() => [buttonRef, menuRef], []);
-  useCloseOnOutside(open, roots, close);
 
   useEffect(() => {
     refreshKeyRef.current = refreshKey;
@@ -65,12 +59,6 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
 
   if (!host?.motion) return null;
   const motion = host.motion;
-
-  const showMenu = () => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) setAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    setOpen(true);
-  };
 
   const check = async () => {
     setRunning(true);
@@ -84,7 +72,7 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
       setOutcome({ kind: "error", message: hostErrorMessage(reason) });
     } finally {
       setRunning(false);
-      showMenu();
+      popover.show();
     }
   };
 
@@ -96,15 +84,15 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
     <>
       <Tooltip label={label}>
         <button
-          ref={buttonRef}
+          ref={popover.buttonRef}
           type="button"
           aria-label={label}
           aria-haspopup="dialog"
-          aria-expanded={open}
+          aria-expanded={popover.open}
           aria-busy={running}
           onClick={() => {
             if (running) return;
-            if (outcome && !open) showMenu();
+            if (outcome && !popover.open) popover.show();
             else void check();
           }}
           className={`${findings.length > 0 ? flatActive : flatIdle} relative`}
@@ -122,59 +110,53 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
         </button>
       </Tooltip>
 
-      {open &&
-        anchor &&
-        outcome &&
-        createPortal(
-          <div
-            ref={menuRef}
-            role="dialog"
-            aria-label="Motion check"
-            style={{ top: anchor.top, right: anchor.right }}
-            className="fixed z-[1000] flex max-h-[60vh] w-80 flex-col rounded-xl border border-panel-border bg-panel-bg p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_12px_40px_rgba(0,0,0,0.06)]"
+      {outcome && (
+        <AnchoredPopover
+          popover={popover}
+          label="Motion check"
+          className="flex max-h-[60vh] w-80 flex-col"
+        >
+          <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
+            {summaryOf(outcome)}
+            {!onMain &&
+              findings.length > 0 &&
+              ` Times are in ${MAIN_COMPOSITION}: open it to go to them.`}
+          </p>
+          <div className="min-h-0 overflow-y-auto">
+            {findings.map((finding, index) => (
+              <button
+                key={`${finding.issue}-${finding.target}-${finding.start}-${index}`}
+                type="button"
+                disabled={!onMain}
+                onClick={() => usePlayerStore.getState().requestSeek(finding.start)}
+                className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors enabled:hover:bg-panel-input"
+              >
+                <span className="flex w-full items-baseline justify-between gap-2 text-[12px]">
+                  <span className="min-w-0 truncate font-mono text-panel-text-1">
+                    {finding.target}
+                  </span>
+                  <span className="shrink-0 text-warning-ink">{ISSUE_LABELS[finding.issue]}</span>
+                </span>
+                <span className="font-mono text-[10px] tabular-nums text-panel-text-3">
+                  {finding.start.toFixed(2)}–{finding.end.toFixed(2)} s
+                </span>
+                <span className="text-[11px] leading-snug text-panel-text-2">{finding.hint}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => {
+              popover.close();
+              void check();
+            }}
+            className="mt-1 rounded-md border-t border-panel-border px-2 pt-2 pb-1 text-left text-[11px] text-studio-accent transition-colors hover:underline disabled:opacity-40"
           >
-            <p className="px-2 pt-1 pb-2 text-[11px] leading-relaxed text-panel-text-3">
-              {summaryOf(outcome)}
-              {!onMain &&
-                findings.length > 0 &&
-                ` Times are in ${MAIN_COMPOSITION}: open it to go to them.`}
-            </p>
-            <div className="min-h-0 overflow-y-auto">
-              {findings.map((finding, index) => (
-                <button
-                  key={`${finding.issue}-${finding.target}-${finding.start}-${index}`}
-                  type="button"
-                  disabled={!onMain}
-                  onClick={() => usePlayerStore.getState().requestSeek(finding.start)}
-                  className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors enabled:hover:bg-panel-input"
-                >
-                  <span className="flex w-full items-baseline justify-between gap-2 text-[12px]">
-                    <span className="min-w-0 truncate font-mono text-panel-text-1">
-                      {finding.target}
-                    </span>
-                    <span className="shrink-0 text-warning-ink">{ISSUE_LABELS[finding.issue]}</span>
-                  </span>
-                  <span className="font-mono text-[10px] tabular-nums text-panel-text-3">
-                    {finding.start.toFixed(2)}–{finding.end.toFixed(2)} s
-                  </span>
-                  <span className="text-[11px] leading-snug text-panel-text-2">{finding.hint}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              disabled={running}
-              onClick={() => {
-                close();
-                void check();
-              }}
-              className="mt-1 rounded-md border-t border-panel-border px-2 pt-2 pb-1 text-left text-[11px] text-studio-accent transition-colors hover:underline disabled:opacity-40"
-            >
-              Check again
-            </button>
-          </div>,
-          document.body,
-        )}
+            Check again
+          </button>
+        </AnchoredPopover>
+      )}
     </>
   );
 });

@@ -11,6 +11,17 @@ import {
 } from "../../player/store/agentStretchStore";
 import { AgentPanel } from "./AgentPanel";
 
+const uploadProjectFiles = vi.fn((files: Iterable<File>, dir?: string) =>
+  Promise.resolve(Array.from(files).map((file) => `${dir}/${file.name}`)),
+);
+
+vi.mock("../../contexts/FileManagerContext", () => ({
+  useFileManagerContextOptional: () => ({
+    fileTree: ["index.html", "assets/logo.png", "compositions/slide-01.html"],
+    uploadProjectFiles,
+  }),
+}));
+
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 let host = document.createElement("div");
@@ -98,6 +109,43 @@ describe("AgentPanel with stretches drawn on the timeline", () => {
     });
     expect(send).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(host.querySelector("textarea"));
+  });
+});
+
+describe("AgentPanel @ mentions", () => {
+  const message = () => host.querySelector<HTMLTextAreaElement>("textarea")!;
+  const typeAtEnd = (value: string) => {
+    typeInto(message(), value);
+    message().setSelectionRange(value.length, value.length);
+    message().dispatchEvent(new Event("select", { bubbles: true }));
+  };
+
+  it("offers the matching files, inserts the chosen one, and names it in the prompt", async () => {
+    act(() => typeAtEnd("Put @lo"));
+    const options = host.querySelectorAll('[role="option"]');
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain("logo.png");
+
+    act(() => {
+      message().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(message().value).toBe("Put @assets/logo.png ");
+    expect(host.querySelector('[role="listbox"]')).toBeNull();
+
+    await act(async () => sendButton().click());
+    const [{ prompt }] = send.mock.calls[0] as unknown as [{ prompt: string }];
+    expect(prompt).toMatch(/^Put @assets\/logo\.png\n\nFiles the message names with @/);
+    expect(prompt).toMatch(/\n- assets\/logo\.png$/);
+  });
+
+  it("copies a picked file into assets and mentions it", async () => {
+    const picker = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["png"], "product.png", { type: "image/png" });
+    Object.defineProperty(picker, "files", { value: [file], configurable: true });
+    await act(async () => picker.dispatchEvent(new Event("change", { bubbles: true })));
+
+    expect(uploadProjectFiles).toHaveBeenCalledWith([file], "assets");
+    expect(message().value).toBe("@assets/product.png ");
   });
 });
 

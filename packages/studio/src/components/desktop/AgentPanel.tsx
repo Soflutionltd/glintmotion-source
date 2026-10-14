@@ -1,5 +1,13 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, DownloadSimple, NotePencil, SignIn, Square, Wrench } from "@phosphor-icons/react";
+import {
+  ArrowUp,
+  DownloadSimple,
+  NotePencil,
+  Paperclip,
+  SignIn,
+  Square,
+  Wrench,
+} from "@phosphor-icons/react";
 import type {
   AgentEvent,
   ClaudeAccountAction,
@@ -12,6 +20,9 @@ import { ProjectsColumnToggle } from "./ProjectsColumnToggle";
 import { AgentPendingStretches } from "./AgentPendingStretches";
 import { usePersistedAgentChat, useStudioProjectId } from "./usePersistedAgentChat";
 import { useHomeRequest } from "./useHomeRequest";
+import { useAgentMentions } from "./useAgentMentions";
+import { AgentMentionMenu } from "./AgentMentionMenu";
+import { TIMELINE_ASSET_MIME } from "../../utils/timelineAssetDrop";
 import {
   agentStretchPrompt,
   clearAgentStretches,
@@ -42,7 +53,7 @@ function describeDone(event: Extract<AgentEvent, { kind: "done" }>): string {
 
 function composerLabels(stretchCount: number) {
   if (stretchCount === 0)
-    return { send: "Send", placeholder: "Ask Claude Code to change the video…" };
+    return { send: "Send", placeholder: "Ask Claude Code to change the video. @ names a file…" };
   return {
     send: `Send ${stretchCount} edit${stretchCount === 1 ? "" : "s"} to Claude Code`,
     placeholder: "Add a note for all of them (optional)…",
@@ -61,6 +72,8 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   const nextId = useRef(items.reduce((next, item) => Math.max(next, item.id + 1), 0));
   const listRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const mentions = useAgentMentions(draft, setDraft, messageRef);
 
   const push = useCallback(
     (item: NewChatItem) =>
@@ -125,7 +138,7 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
   const send = (text = draft) => {
     const message = text.trim();
     if ((!message && stretches.length === 0) || busy || !ready) return;
-    const prompt = agentStretchPrompt(message, stretches);
+    const prompt = mentions.resolvePrompt(agentStretchPrompt(message, stretches));
     push({ role: "user", text: prompt });
     setDraft("");
     clearAgentStretches();
@@ -266,18 +279,41 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
       </div>
 
       <form
-        className="m-2.5 shrink-0 rounded-xl border border-panel-border bg-panel-input/40 p-2"
+        className="relative m-2.5 shrink-0 rounded-xl border border-panel-border bg-panel-input/40 p-2"
         onSubmit={(event) => {
           event.preventDefault();
           send();
         }}
+        onDragOver={(event) => {
+          const types = event.dataTransfer.types;
+          if (types.includes("Files") || types.includes(TIMELINE_ASSET_MIME))
+            event.preventDefault();
+        }}
+        onDrop={(event) => {
+          const asset = event.dataTransfer.getData(TIMELINE_ASSET_MIME);
+          if (!asset && event.dataTransfer.files.length === 0) return;
+          event.preventDefault();
+          if (asset) mentions.mentionDropped(asset);
+          else void mentions.attach(Array.from(event.dataTransfer.files));
+        }}
       >
+        <AgentMentionMenu
+          options={mentions.options}
+          active={mentions.active}
+          onChoose={mentions.choose}
+        />
         <AgentPendingStretches disabled={busy} onNoteDone={() => messageRef.current?.focus()} />
         <textarea
           ref={messageRef}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            mentions.track();
+          }}
+          onSelect={mentions.track}
+          onBlur={() => requestAnimationFrame(mentions.track)}
           onKeyDown={(event) => {
+            if (mentions.handleKey(event)) return;
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               send();
@@ -288,7 +324,33 @@ export const AgentPanel = memo(function AgentPanel({ host }: { host: DesktopHost
           aria-label="Message to the agent"
           className="w-full resize-none bg-transparent px-1 text-[12px] leading-relaxed text-panel-text-1 outline-none placeholder:text-neutral-500"
         />
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between">
+          {mentions.canAttach ? (
+            <>
+              <button
+                type="button"
+                onClick={() => pickerRef.current?.click()}
+                aria-label="Attach a file"
+                title="Attach a file, or type @ to name one of the project's"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-panel-text-3 transition-colors hover:bg-panel-input hover:text-panel-text-1"
+              >
+                <Paperclip size={14} aria-hidden="true" />
+              </button>
+              <input
+                ref={pickerRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  void mentions.attach(files);
+                }}
+              />
+            </>
+          ) : (
+            <span />
+          )}
           {busy ? (
             <button
               type="button"

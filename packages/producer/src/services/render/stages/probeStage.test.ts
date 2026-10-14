@@ -364,6 +364,16 @@ describe("hasVariableBoundMedia", () => {
     expect(hasVariableBoundMedia(audio, { title: "Row 02" })).toBe(false);
     expect(hasVariableBoundMedia(image, { hero_src: "row-02.png" })).toBe(true);
   });
+
+  it("probes a video whose declared default names another file than its src", () => {
+    const declare = (fallback: string) =>
+      `<html data-composition-variables='[{"id":"clip","type":"string","default":"${fallback}"}]'><body>` +
+      `<video id="v" src="assets/a.mp4" data-var-src="clip"></video></body></html>`;
+
+    expect(hasVariableBoundMedia(declare("assets/b.mp4"), undefined)).toBe(true);
+    expect(hasVariableBoundMedia(declare("assets/a.mp4"), undefined)).toBe(false);
+    expect(hasVariableBoundMedia(declare(""), {})).toBe(false);
+  });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {

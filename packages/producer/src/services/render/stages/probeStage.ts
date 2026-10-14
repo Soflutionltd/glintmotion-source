@@ -160,24 +160,51 @@ export function hasAutoStartVideos(html: string): boolean {
   return document.querySelector("video[data-hf-auto-start]") !== null;
 }
 
+/** Declared string defaults across every `data-composition-variables` attribute. */
+function declaredStringDefaults(document: Document): Map<string, string> {
+  const defaults = new Map<string, string>();
+  for (const declarer of Array.from(document.querySelectorAll("[data-composition-variables]"))) {
+    let entries: unknown;
+    try {
+      entries = JSON.parse(declarer.getAttribute("data-composition-variables") ?? "");
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry && typeof entry.id === "string" && typeof entry.default === "string") {
+        defaults.set(entry.id, entry.default);
+      }
+    }
+  }
+  return defaults;
+}
+
 /**
  * Variable-bound image/audio/video sources are resolved by the browser runtime, not
  * the static compiler. Probe them whenever the current render overrides the
- * referenced variable so media extraction follows the resolved row value.
+ * referenced variable, or its declared default names another file than the
+ * element's `src`, so media extraction follows the value the browser shows.
  */
 export function hasVariableBoundMedia(
   html: string,
   variables: Record<string, unknown> | undefined,
 ): boolean {
-  if (!variables || Object.keys(variables).length === 0) return false;
   const { document } = parseHTML(html);
-  return Array.from(
+  const bound = Array.from(
     document.querySelectorAll(
       "img[data-var-src], audio[data-var-src], video[data-var-src], source[data-var-src]",
     ),
-  ).some((element) => {
+  );
+  if (bound.length === 0) return false;
+  const overrides = variables ?? {};
+  const defaults = declaredStringDefaults(document);
+  return bound.some((element) => {
     const variableId = element.getAttribute("data-var-src")?.trim();
-    return Boolean(variableId && Object.hasOwn(variables, variableId));
+    if (!variableId) return false;
+    if (Object.hasOwn(overrides, variableId)) return true;
+    const fallback = defaults.get(variableId);
+    return fallback !== undefined && fallback !== "" && fallback !== element.getAttribute("src");
   });
 }
 

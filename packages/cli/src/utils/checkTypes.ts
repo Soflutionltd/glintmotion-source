@@ -15,6 +15,8 @@ export interface CheckOptions {
   maxTransitionSamples?: number;
   /** Also sample each animated text at rest (between its tweens, after its last one). */
   textSettled?: boolean;
+  /** Composition variable overrides, audited as a render with them would show. */
+  variables?: Record<string, unknown>;
   maxIssues: number;
   collapseStatic: boolean;
   tolerance: number;

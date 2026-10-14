@@ -186,14 +186,22 @@ function proxyFailedDraft(message: string): RuntimeDraft {
   return { code: "media_proxy_failed", severity: "warning", message, time: 0 };
 }
 
+/** The page check audits: the bundled project, with `--variables` set as a render would. */
+async function checkHtml(projectDir: string, options: CheckOptions): Promise<string> {
+  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
+  const html = await bundleWithLocalizedFonts(projectDir);
+  if (!options.variables) return html;
+  const { injectPreviewVariables } = await import("@hyperframes/studio-server");
+  return injectPreviewVariables(html, options.variables);
+}
+
 export async function runBrowserCheck(
   project: ProjectDir,
   options: CheckOptions,
   motion: MotionSpecResolution,
   runGrid: RunAuditGrid,
 ): Promise<CheckBrowserResult> {
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await checkHtml(project.dir, options);
   const { findings: drafts, failedPaths } = await preResolveHostileMediaProxies(
     project.dir,
     html,
@@ -268,8 +276,7 @@ export async function captureFindingCrops(
   requests: CheckFindingCropRequest[],
 ): Promise<string[]> {
   if (requests.length === 0) return [];
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await checkHtml(project.dir, options);
   const server = await serveStaticProjectHtml(
     project.dir,
     html,

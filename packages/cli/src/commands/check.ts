@@ -35,6 +35,7 @@ import {
 } from "../utils/checkPipeline.js";
 import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../utils/checkTypes.js";
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
+import { resolveVariablesArg } from "../utils/variables.js";
 import { fixProjectLint, printFixes, type LintFixReport } from "../utils/lintFix.js";
 
 export const examples: Example[] = [
@@ -181,6 +182,15 @@ const CHECK_COMMAND_ARGS = {
     type: "string",
     description:
       "Optional cap on transition-derived samples; when it truncates, the omitted count is reported (default: unlimited)",
+  },
+  variables: {
+    type: "string",
+    description:
+      "JSON object of variable values to check the composition with, as render --variables (e.g. one row of a series)",
+  },
+  "variables-file": {
+    type: "string",
+    description: "Path to a JSON file with variable values (alternative to --variables)",
   },
   "text-settled": {
     type: "boolean",
@@ -332,6 +342,10 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     atTransitions: args["at-transitions"] === true,
     maxTransitionSamples: maxTransitionSamples > 0 ? maxTransitionSamples : undefined,
     textSettled: args["text-settled"] !== false,
+    variables: resolveVariablesArg(
+      typeof args.variables === "string" ? args.variables : undefined,
+      typeof args["variables-file"] === "string" ? args["variables-file"] : undefined,
+    ),
     maxIssues: positiveInteger(args["max-issues"], DEFAULT_CHECK_OPTIONS.maxIssues),
     collapseStatic: args["collapse-static"] !== false,
     tolerance: nonNegativeNumber(args.tolerance, DEFAULT_CHECK_OPTIONS.tolerance),

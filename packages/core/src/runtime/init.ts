@@ -6,7 +6,12 @@ import { preloadMedia, releaseMedia, lengthIsAuthored, stopMediaDownload } from 
 import { installRuntimeControlBridge, postRuntimeMessage, setRuntimeProtocolFps } from "./bridge";
 import { instantTolerance } from "../clipFacts";
 import { isInClipWindow } from "./clipWindow";
-import { revealTimedClipsAfterFirstPass, SKIPPED_CLIP, skipsHiddenImages } from "./timedClipHide";
+import {
+  CLIP_HIDDEN_ATTR,
+  revealTimedClipsAfterFirstPass,
+  SKIPPED_CLIP,
+  skipsHiddenImages,
+} from "./timedClipHide";
 import {
   PREVIEW_ONLY_ATTRS,
   RUNTIME_STAMPED_ATTR,
@@ -16,7 +21,7 @@ import {
 import { initRuntimeAnalytics, emitAnalyticsEvent } from "./analytics";
 import { injectCompositionCssVariables } from "./getVariables";
 import { createCssAdapter } from "./adapters/css";
-import { createGsapAdapter, rerenderGsapTimelineAt } from "./adapters/gsap";
+import { createGsapAdapter, rerenderGsapTimelineAt, seekGsapTimeline } from "./adapters/gsap";
 import { createAnimeJsAdapter } from "./adapters/animejs";
 import { createLottieAdapter } from "./adapters/lottie";
 import { createThreeAdapter } from "./adapters/three";
@@ -48,6 +53,7 @@ import {
   resolveNaturalMediaTimelineDuration,
   resolveRuntimeMediaClipDuration,
   syncRuntimeMedia,
+  VIDEO_PRESEEK_SECONDS,
   type RuntimeMediaClip,
 } from "./media";
 import {
@@ -295,6 +301,7 @@ const RUNTIME_MEDIA_ATTRS = new Set([
   "src",
   COLOR_GRADING_AUTHORED_OPACITY_ATTR,
   EDIT_ORIGINAL_TRANSLATE_ATTR,
+  CLIP_HIDDEN_ATTR,
   ...PREVIEW_ONLY_ATTRS,
 ]);
 const ownClasses = (value: string) =>
@@ -1663,8 +1670,7 @@ export function initSandboxRuntimeModular(): void {
       // Without this, children added after the root was created may still show initial styles.
       if (autoNestedChildren.length > 0) {
         try {
-          const currentTime = rootTimeline.time();
-          rootTimeline.seek(currentTime, false); // false = don't suppress events
+          seekGsapTimeline(rootTimeline, rootTimeline.time(), false);
         } catch {
           /* ignore */
         }
@@ -2323,7 +2329,7 @@ export function initSandboxRuntimeModular(): void {
       // abort restoring the transport time below (the catch would swallow it too).
       pauseTimelineIfPossible(state.capturedTimeline);
       if (typeof state.capturedTimeline.seek === "function") {
-        state.capturedTimeline.seek(previousTime, false);
+        seekGsapTimeline(state.capturedTimeline, previousTime, false);
       }
     } catch (err) {
       // keep runtime resilient even if a timeline implementation throws
@@ -2824,6 +2830,7 @@ export function initSandboxRuntimeModular(): void {
         clipChainVisibleAt(rawNode.parentElement, currentTime, visibleAt, rootComp);
       const isRuntimeStamped = stampsForStudio && rawNode.hasAttribute(RUNTIME_STAMPED_ATTR);
       if (!isRuntimeStamped) rawNode.style.visibility = isVisibleNow ? "visible" : "hidden";
+      rawNode.toggleAttribute(CLIP_HIDDEN_ATTR, !isRuntimeStamped && !isVisibleNow);
       const upcoming =
         hiddenImagesSkipped && !isVisibleNow && dueSoon(rawNode, visibleAt, currentTime);
       if (upcoming && !rawNode.hasAttribute(STUDIO_PREVIEW_UPCOMING_ATTR))
@@ -3034,6 +3041,17 @@ export function initSandboxRuntimeModular(): void {
     }
     for (const clip of clipsWithEndpointBetween(index.byEnd, (c) => c.end, lo, hi)) {
       visiting.add(clip.el);
+    }
+    if (state.isPlaying && !window.__HF_EXPORT_RENDER_SEEK_CONFIG) {
+      // An endpoint-only pass reaches trimmed video too late: its first visible tick starts a seek.
+      for (const clip of clipsWithEndpointBetween(
+        index.byStart,
+        (c) => c.start,
+        toSeconds,
+        toSeconds + VIDEO_PRESEEK_SECONDS * state.playbackRate,
+      )) {
+        if (clip.el.tagName === "VIDEO") visiting.add(clip.el);
+      }
     }
     return [...visiting];
   };
@@ -4240,11 +4258,7 @@ export function initSandboxRuntimeModular(): void {
       const suppressEvents = options?.suppressEvents === true;
       // Guarded: a partial timeline without pause() must still get its seek.
       pauseTimelineIfPossible(timeline);
-      if (typeof timeline.totalTime === "function") {
-        timeline.totalTime(timeSeconds, suppressEvents);
-      } else {
-        timeline.seek(timeSeconds, suppressEvents);
-      }
+      seekGsapTimeline(timeline, timeSeconds, suppressEvents);
     } catch (err) {
       swallow(swallowLabel, err);
     }
@@ -4399,8 +4413,8 @@ export function initSandboxRuntimeModular(): void {
       }
       try {
         if (typeof tl.totalTime === "function") {
-          tl.totalTime(tlSeekTime, suppressEvents);
-          if (!suppressEvents && !hasZeroDurationCallbackTween(tl)) {
+          const redrawn = seekGsapTimeline(tl, tlSeekTime, suppressEvents);
+          if (!redrawn && !suppressEvents && !hasZeroDurationCallbackTween(tl)) {
             // The first seek is the only eventful one; the re-render only refreshes styles.
             rerenderGsapTimelineAt(
               {

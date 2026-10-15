@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/engine",
-  "version": "0.8.152",
+  "version": "0.8.160",
   "description": "Seekable web page to video rendering engine (Puppeteer + FFmpeg)",
   "repository": {
     "type": "git",
@@ -35,6 +35,11 @@
       "import": "./src/services/systemMemory.ts",
       "types": "./src/services/systemMemory.ts"
     },
+    "./wsl-host": {
+      "bun": "./src/services/wslHost.ts",
+      "import": "./src/services/wslHost.ts",
+      "types": "./src/services/wslHost.ts"
+    },
     "./shader-transitions": {
       "bun": "./src/utils/shaderTransitions.ts",
       "import": "./src/utils/shaderTransitions.ts",
@@ -60,6 +65,10 @@
       "./system-memory": {
         "import": "./dist/services/systemMemory.js",
         "types": "./dist/services/systemMemory.d.ts"
+      },
+      "./wsl-host": {
+        "import": "./dist/services/wslHost.js",
+        "types": "./dist/services/wslHost.d.ts"
       },
       "./shader-transitions": {
         "import": "./dist/utils/shaderTransitions.js",

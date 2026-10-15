@@ -9,6 +9,173 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.8.160"
+  description="Released - 2026-10-15"
+  tags={["Release", "CLI", "Runtime", "Studio"]}
+>
+Measure sound timing with the new audio command. This release also improves trimmed-video previews, Windows rendering, Claude usage reporting, history saves, and element picking.
+
+## Features
+
+- Measure audio onsets, peaks, pauses, and loudness with `hyperframes audio`. Project queries report film time, including clip trims and playback rates. Timeline rows now expose `mediaStart` for consumers that map file timestamps into the film. ([#5602](https://github.com/heygen-com/hyperframes/pull/5602))
+
+## Fixes
+
+- Prepare trimmed video frames before preview cuts, reducing flashes of the wrong frame. ([#5633](https://github.com/heygen-com/hyperframes/pull/5633))
+- Keep history saves moving when a file changes while it is being copied. ([#5627](https://github.com/heygen-com/hyperframes/pull/5627))
+- Show Claude plan spending even when the usage response has no rate windows. ([#5629](https://github.com/heygen-com/hyperframes/pull/5629))
+- Let the first Windows render wait for newly installed browser and FFmpeg files to become accessible. ([#5625](https://github.com/heygen-com/hyperframes/pull/5625))
+- Select content beneath faint SVG grain and keep page-wide CSS resets out of an element's inspected styles. ([#5628](https://github.com/heygen-com/hyperframes/pull/5628))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.159...v0.8.160)
+</Update>
+
+<Update
+  label="HyperFrames v0.8.159"
+  description="Released - 2026-10-14"
+  tags={["Release", "CLI"]}
+>
+`check` and `snapshot` now work in sandboxes that refuse to listen on localhost. `snapshot --keep` lets you redo one still without losing the others.
+
+## Features
+
+- **CLI:** `snapshot --keep` redoes one still and leaves the others ([c0636d017f6](https://github.com/heygen-com/hyperframes/commit/c0636d017f68073522ab8eeb6cc24a2d3993b656), [#5605](https://github.com/heygen-com/hyperframes/pull/5605)). It adds to the output folder instead of clearing it and names each still for its time, such as `at-1.5s.png`.
+
+## Fixes
+
+- **Core:** A render's first frame shows each scene's starting state ([8c00ebad80c](https://github.com/heygen-com/hyperframes/commit/8c00ebad80c634f607e3a5283f8a0aa73e35f1dd), [#5614](https://github.com/heygen-com/hyperframes/pull/5614)).
+- **Core:** A hidden scene's contents stay hidden when a child is set visible ([24a9b781715](https://github.com/heygen-com/hyperframes/commit/24a9b781715d0c59f06e4540831529d99c63ae75), [#5619](https://github.com/heygen-com/hyperframes/pull/5619)). Before, a nested scene's card could paint before its host started. The `static-volume-future-set` regression baseline changes for this reason.
+- **CLI:** `check` and `snapshot` run where a sandbox refuses to listen on localhost ([71595dd8201](https://github.com/heygen-com/hyperframes/commit/71595dd82012314f353d1237f50da0fad7639817), [#5618](https://github.com/heygen-com/hyperframes/pull/5618)).
+- **CLI:** The GPU check uses the same pipe as the render, so a sandboxed `check` no longer waits 120 s ([6c89decb0dd](https://github.com/heygen-com/hyperframes/commit/6c89decb0ddbac7c30a7dca6d947f945ebd58c0e), [#5622](https://github.com/heygen-com/hyperframes/pull/5622)).
+- **CLI:** A long video conversion in `init` never stalls on ffmpeg's own log ([b14a4564716](https://github.com/heygen-com/hyperframes/commit/b14a45647166e60e2e51dc018ccb1bb7331003a2), [#5616](https://github.com/heygen-com/hyperframes/pull/5616)).
+
+## Internal
+
+- **Core:** The `var()` font fallback test uses an offline fetch stub instead of Google Fonts ([8f0bcadcd32](https://github.com/heygen-com/hyperframes/commit/8f0bcadcd32893d3ad5231f33b210c410096281f), [#5623](https://github.com/heygen-com/hyperframes/pull/5623)).
+- A stalled history fetch in change detection is retried instead of failing the run ([cd87cf11106](https://github.com/heygen-com/hyperframes/commit/cd87cf11106985c6222723f5b391723882691d6c), [#5615](https://github.com/heygen-com/hyperframes/pull/5615)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.158...v0.8.159).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.158"
+  description="Released - 2026-10-14"
+  tags={["Release", "CLI", "Engine", "Skills"]}
+>
+`hyperframes init --keep-original` brings a clip into a project as it is, without converting it. Storyboards are now one board of stills, and `check` no longer fails on a busy Windows machine.
+
+## Features
+
+- **CLI:** `init --keep-original` copies a clip as it is, without transcoding ([d65eefad5ed](https://github.com/heygen-com/hyperframes/commit/d65eefad5ed351e9d36d2caeb6049878be0aba85), [#5612](https://github.com/heygen-com/hyperframes/pull/5612)).
+- **Skills:** Storyboards are a board of stills with one page format ([6f90ca15a7f](https://github.com/heygen-com/hyperframes/commit/6f90ca15a7fc937d9d6cf3ec289f2a26eca3724f), [#5599](https://github.com/heygen-com/hyperframes/pull/5599)). Agents pose each shot, snapshot it, and lay the stills out on one page, `boards/storyboard.html`, before animating.
+
+## Fixes
+
+- **CLI:** Capture keeps fonts a page declares in its own style block ([4957bf6939a](https://github.com/heygen-com/hyperframes/commit/4957bf6939a34f659070e04b8c355b35e8be0782), [#5609](https://github.com/heygen-com/hyperframes/pull/5609)).
+- **CLI:** A killed browser on a busy Windows machine no longer fails `check` ([fe29f157f94](https://github.com/heygen-com/hyperframes/commit/fe29f157f940c9e07768e25089fb5c4c404ad98d), [#5607](https://github.com/heygen-com/hyperframes/pull/5607)). Windows reports the process gone at once but its exit seconds later, and `check` used to stop on that gap.
+
+## Internal
+
+- **Engine:** The warm extraction cache test checks ffmpeg did not run, not the clock ([14e2ccf3bb0](https://github.com/heygen-com/hyperframes/commit/14e2ccf3bb0e93a2b0226ff665bee36b8033f4a2), [#5613](https://github.com/heygen-com/hyperframes/pull/5613)).
+- **Engine:** Audio effect tests that start Chrome get the same time as the others ([7744692a464](https://github.com/heygen-com/hyperframes/commit/7744692a464aa740c893251478f383f46148c1ee), [#5608](https://github.com/heygen-com/hyperframes/pull/5608)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.157...v0.8.158).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.157"
+  description="Released - 2026-10-14"
+  tags={["Release", "Engine", "Studio", "Docker"]}
+>
+Renders inside WSL use the graphics card again on Chrome 150 and later. Before, they fell back to slow software rendering.
+
+## Fixes
+
+- **Engine:** Renders under WSL reach the GPU on Chrome 150 and later ([38cfcdd56cd](https://github.com/heygen-com/hyperframes/commit/38cfcdd56cdc1a8125a8e68a3604357a23ce819f), [#5591](https://github.com/heygen-com/hyperframes/pull/5591)). Chrome 150 and later find no GPU while WSLg's `WAYLAND_DISPLAY` is set, so HyperFrames checks again without it and renders that way only when that reaches the GPU.
+- **Core:** Keep the colour grade on a graded video's first rendered frame ([95837a3df7](https://github.com/heygen-com/hyperframes/commit/95837a3df7c10199a83fa1bd6ff92eafc2d1e750), [#5575](https://github.com/heygen-com/hyperframes/pull/5575)). This shipped in v0.8.156 but was missing from its notes.
+
+## Internal
+
+- **Studio:** Settle the edit accuracy bench on frames and network, and reuse the producer Chrome ([d9edffa3a4e](https://github.com/heygen-com/hyperframes/commit/d9edffa3a4e766cb97e7beb09efb2682b6ace5fc), [#5571](https://github.com/heygen-com/hyperframes/pull/5571)).
+- **Docker:** Pin FFmpeg 8.0.1 in the Docker images and host CI ([692b89b6e50](https://github.com/heygen-com/hyperframes/commit/692b89b6e50c41cd07e36ecc0ec018bc15373d1e), [#5576](https://github.com/heygen-com/hyperframes/pull/5576)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.156...v0.8.157).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.156"
+  description="Released - 2026-10-14"
+  tags={["Release", "Engine", "Inspector", "Producer"]}
+>
+Videos from screen recordings no longer freeze partway through on FFmpeg 8. Segmented renders with several workers start faster when media is slow to load, and long audio mixes do less work. `@hyperframes/inspector` no longer ships agent tools, so harnesses define their own.
+
+## Breaking Changes
+
+- **Inspector:** Stop shipping agent tools. Harnesses now define their own ([abe97f6e4c](https://github.com/heygen-com/hyperframes/commit/abe97f6e4c704d745dccc4012e7adb2644624c5e), [#5570](https://github.com/heygen-com/hyperframes/pull/5570)). `inspect_components`, `query_timeline`, the stdio MCP server and the `componentsTool`, `timelineTool`, `toolContent` and `InspectionTool` exports from `@hyperframes/inspector/live` are gone. The HTTP contract (`POST /inspect`, `/timeline`, `/element-map`) is unchanged, and `InspectRequest` and `TimelineRequest` are now exported so a harness can build its own schema.
+
+## Fixes
+
+- **Engine:** Renders under WSL use the GPU through full Chrome when the headless shell cannot ([9b996059af](https://github.com/heygen-com/hyperframes/commit/9b996059af6530636b5a3eff9bdd2f52480f14d8), [#5574](https://github.com/heygen-com/hyperframes/pull/5574)). It used to fall back to software rendering.
+- **Producer:** Start segmented render workers together so slow media waits overlap ([d77b03c24c](https://github.com/heygen-com/hyperframes/commit/d77b03c24cd2e7c855c602fa8c4546f8076a1dca), [#5573](https://github.com/heygen-com/hyperframes/pull/5573)). Each worker used to wait for the one before it to finish loading media.
+- **Engine:** Sample VFR video by timestamp so it does not freeze on FFmpeg 8 ([6afcb48395](https://github.com/heygen-com/hyperframes/commit/6afcb48395632b85663b9b9486e1b47fd175f8bc), [#5572](https://github.com/heygen-com/hyperframes/pull/5572)). FFmpeg 8 honours frame durations, so screen recordings with long, overlapping frames held one frame and dropped the rest. Cached frames from older versions are re-extracted.
+- **Engine:** Avoid padding every audio mix input ([3de4763d53](https://github.com/heygen-com/hyperframes/commit/3de4763d53de194b4ddc4d5d8f724fe0e3b3ca74), [#5563](https://github.com/heygen-com/hyperframes/pull/5563)). Short clips no longer stay in the mix for the whole composition, so audio work no longer grows with clip count times length.
+
+## Internal
+
+- **Studio:** Run the edit accuracy slice on PRs and the full grid in the merge queue ([9a2c1c6e80](https://github.com/heygen-com/hyperframes/commit/9a2c1c6e80c7f706c39d3a49d6d87dfd8c8814de), [#5566](https://github.com/heygen-com/hyperframes/pull/5566)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.155...v0.8.156).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.155"
+  description="Released - 2026-10-13"
+  tags={["Release", "Producer", "Engine", "Studio Server"]}
+>
+MP4 renders at widths like 1000, 1080 or 1112 no longer get a black strip down the right edge on newer FFmpeg. Both the Studio render route and the producer render server now take encoder settings such as CRF, and distributed renders keep the CRF you ask for.
+
+## Features
+
+- **Producer:** The render server's `/render` and `/render/stream` accept `crf`, `videoBitrate` and `videoFrameFormat` ([5de2712ad5](https://github.com/heygen-com/hyperframes/commit/5de2712ad587ae3fe06e4087e30650fdbe34c909), [#5550](https://github.com/heygen-com/hyperframes/pull/5550)). A bad `videoFrameFormat` now returns a 400 instead of being ignored.
+- **Studio Server:** Accept `crf`, `videoBitrate`, `videoFrameFormat` and `hdrMode` on the render route ([ab8a4da53f](https://github.com/heygen-com/hyperframes/commit/ab8a4da53f31653350632980fa63cb07e957f0f6), [#5549](https://github.com/heygen-com/hyperframes/pull/5549)). Out-of-range values return a 400, and `crf` with `videoBitrate` together is rejected.
+
+## Fixes
+
+- **Engine:** Keep the rightmost 8 columns of SDR MP4 at widths like 1080 ([401354cd8f](https://github.com/heygen-com/hyperframes/commit/401354cd8f685d9ec9011b41d2c4269289d29598), [#5559](https://github.com/heygen-com/hyperframes/pull/5559)). FFmpeg 7.1 and 8.0 dropped the last 8 pixel columns to black when the width was 8 more than a multiple of 16.
+- **Producer:** Keep the requested CRF in the distributed constant-frame-rate re-encode ([bf4cf860fb](https://github.com/heygen-com/hyperframes/commit/bf4cf860fbd26a7d51938c5f11987c335d4e848a), [#5557](https://github.com/heygen-com/hyperframes/pull/5557)). It used to fall back to the quality preset.
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.154...v0.8.155).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.154"
+  description="Released - 2026-10-13"
+  tags={["Release", "Inspector"]}
+>
+Live inspection keeps answering after a composition with audio is opened. Studio's waveform and thumbnail caches no longer make every question report a stale preview.
+
+## Fixes
+
+- **Inspector:** Stop audio waveform caches from making every live question stale ([6f76b3067](https://github.com/heygen-com/hyperframes/commit/6f76b306751fdab465d9c6702228b119edd8ce30), [#5536](https://github.com/heygen-com/hyperframes/pull/5536)). Live inspection now ignores the same cache folders Studio's preview reload ignores.
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.153...v0.8.154).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.153"
+  description="Released - 2026-10-13"
+  tags={["Release", "CLI"]}
+>
+`hyperframes check` now stops instead of running forever when a composition script gets stuck. If this happens during startup, the error names the file.
+
+## Fixes
+
+- **CLI:** Stop stuck checks and report the file to fix ([c96099d39a1](https://github.com/heygen-com/hyperframes/commit/c96099d39a12332d5d87bd922b0d7c1b277b9f22), [#5537](https://github.com/heygen-com/hyperframes/pull/5537)). Browser downloads and first launch no longer use up the check's time limit.
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.152...v0.8.153).
+</Update>
+
+<Update
   label="HyperFrames v0.8.152"
   description="Released - 2026-10-13"
   tags={["Release", "CLI", "Catalog", "Studio"]}

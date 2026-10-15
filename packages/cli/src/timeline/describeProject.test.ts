@@ -276,6 +276,7 @@ describe("describeProject", () => {
     );
     // (0.72 - 0.2) / 2, hand-computed
     expect(row!.duration).toBeCloseTo(0.26, 1);
+    expect(row!.mediaStart).toBe(0.2);
   });
 
   it("takes a media leaf's duration from the probe when none is authored", async () => {

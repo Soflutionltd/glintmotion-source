@@ -49,6 +49,37 @@ export function rerenderGsapTimelineAt(
   }
 }
 
+type GsapRenderState = { _initted?: number };
+
+function gsapNeverRendered(timeline: RuntimeTimelineLike): boolean {
+  const [child] = (timeline.getChildren?.(false, true, true) ?? []) as { parent?: unknown }[];
+  const rendered = child?.parent as GsapRenderState | undefined;
+  return rendered !== undefined && !rendered._initted;
+}
+
+export function seekGsapTimeline(
+  timeline: RuntimeTimelineLike,
+  t: number,
+  suppressEvents: boolean,
+): boolean {
+  if (typeof timeline.totalTime !== "function") {
+    timeline.seek(t, suppressEvents);
+    return false;
+  }
+  const gsapSkipsRenderInPlace = Number(timeline.totalTime()) === t;
+  timeline.totalTime(t, suppressEvents);
+  if (!gsapSkipsRenderInPlace || !gsapNeverRendered(timeline)) return false;
+  rerenderGsapTimelineAt(
+    {
+      totalTime: timeline.totalTime.bind(timeline),
+      totalDuration: timeline.totalDuration?.bind(timeline),
+      getChildren: timeline.getChildren?.bind(timeline),
+    },
+    t,
+  );
+  return true;
+}
+
 type GsapParent = {
   _dur: number;
   _tDur: number;

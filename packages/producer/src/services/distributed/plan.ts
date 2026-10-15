@@ -1,3 +1,4 @@
+import { audioFailureDiagnostics } from "@hyperframes/engine";
 /**
  * Activity A of the distributed render pipeline.
  *
@@ -337,6 +338,7 @@ export function applyDistributedAudioWarningPolicy(
         message: `Audio mix failed; output would be video-only: ${audioError}`,
         details: {
           mediaType: "audio",
+          audioFailures: audioFailureDiagnostics(audioFailures),
           failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
           failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
           failureOwner,

@@ -15,7 +15,7 @@ import { buildGrid, writeFixture } from "./grid.mjs";
 import { killServers, runCase, startServer, stopServer } from "./case.mjs";
 import { runSequence } from "./sequences.mjs";
 import { METRICS, score, writeReport } from "./report.mjs";
-import { renderBox } from "./render.mjs";
+import { holdProducerBrowser, renderBox } from "./render.mjs";
 import { aabb, boxDistance } from "./geometry.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -218,11 +218,15 @@ const browsers = await Promise.all(
     }),
   ),
 );
+// One producer Chrome for the run; each render still gets its own page and file server.
+const producerRoot = mkdtempSync(join(tmpdir(), "hf-edit-accuracy-producer-"));
+liveRoots.add(producerRoot);
+const releaseProducer = await holdProducerBrowser(producerRoot);
 try {
   const decoders = await Promise.all(browsers.map((b) => b.newPage()));
   await runChunks([...cases], browsers, decoders, results);
 } finally {
-  await Promise.all(browsers.map((b) => b.close()));
+  await Promise.all([releaseProducer(), ...browsers.map((b) => b.close())]);
 }
 results.sort((a, b) => a.id.localeCompare(b.id));
 const meta = {

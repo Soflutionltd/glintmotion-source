@@ -91,6 +91,15 @@ export async function extractHtml(
         try { return "url('" + new URL(url, location.href).href + "')"; } catch(e) { return "url('" + url + "')"; }
       });
     });
+    // A page's own <style> blocks too: the font download only fetches absolute urls.
+    document.querySelectorAll("style").forEach(function(el) {
+      var css = el.textContent || "";
+      var fixed = css.replace(/url\\(\\s*['"]?([^'"\\)\\s]+)['"]?\\s*\\)/g, function(match, url) {
+        if (/^(data:|https?:|\\/\\/|#)/i.test(url)) return match;
+        try { return "url('" + new URL(url, document.baseURI).href + "')"; } catch(e) { return match; }
+      });
+      if (fixed !== css) el.textContent = fixed;
+    });
   })()`);
 
   // Step 3b: Convert cross-origin images to data URLs

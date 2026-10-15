@@ -174,7 +174,7 @@ function table(summary, meta, results) {
     `Pass: tracking, press jump, teleport, drop, reload and render ≤ ${LIMIT_PX} px; undo and redo byte-identical with the box ≤ ${LIMIT_PX} px; no more frames over ${DROPPED_FRAME_MS} ms than the blank-page control, and no frame over ${WORK_MS} ms of main-thread work.`,
     "",
     `Undo or redo left different bytes in ${summary.bytesDiffer.undo} undo and ${summary.bytesDiffer.redo} redo cases.`,
-    `The preview never held still for 1 s within 15 s in ${summary.unsettled} cases; the metrics that snapshot feeds fail.`,
+    `The preview never held still within 15 s in ${summary.unsettled} cases; the metrics that snapshot feeds fail.`,
     `An undo or redo write never landed within 60 s in ${summary.undoTimeouts} cases; undo fails there.`,
     `An undo or redo write landed later than ${UNDO_WRITE_MAX_MS} ms after its key in ${summary.undoSlow} cases; undo fails there.`,
     `The producer failed to render ${summary.renderErrors} cases; render fails there.`,

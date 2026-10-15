@@ -83,6 +83,7 @@ import {
   errorBox,
 } from "../ui/format.js";
 import { warnIfWebmAlphaDropped } from "../utils/webmAlphaCheck.js";
+import { renderFailureDiagnostic } from "../ui/renderDiagnostic.js";
 import { renderProgress, renderMachineProgress } from "../ui/progress.js";
 import {
   trackRenderComplete,
@@ -903,7 +904,7 @@ async function renderDocker(
       const stderrTail = createStderrTail();
       // stderr is piped so the failure can name its cause; it is still echoed live.
       const child = spawn("docker", dockerArgs, {
-        stdio: options.quiet ? ["pipe", "pipe", "pipe"] : ["inherit", "inherit", "pipe"],
+        stdio: options.quiet ? ["pipe", "ignore", "pipe"] : ["inherit", "inherit", "pipe"],
       });
       child.stderr?.on("data", (chunk: Buffer) => {
         process.stderr.write(chunk);
@@ -1768,6 +1769,7 @@ function handleRenderError(
   job?: RenderJob,
 ): never {
   const message = normalizeErrorMessage(error);
+  renderFailureDiagnostic(job, error, options.quiet);
   trackRenderError({
     fps: fpsToNumber(options.fps),
     quality: options.quality,

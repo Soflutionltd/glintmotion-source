@@ -617,6 +617,69 @@ describe("renderLocal browser GPU config", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { quiet: false, interrupted: false, emits: true },
+    { quiet: false, interrupted: true, emits: true },
+    { quiet: true, interrupted: false, emits: false },
+  ])("writes the failure diagnostic only for piped non-JSON output: %j", async (mode) => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-render-diagnostic-"));
+    const failures = [
+      {
+        stage: "prepare",
+        reason: "ffmpeg_failed",
+        owner: "system",
+        retryable: false,
+        subprocess: { exitCode: 7, terminationReason: "exit" },
+        detail: "private-detail",
+        elementId: "private-id",
+      },
+    ];
+    producerState.executeImpl = async (job) => {
+      if (mode.interrupted) throw Object.assign(new Error("failed"), { audioFailures: failures });
+      job.warnings = [
+        {
+          code: "audio_processing_failed",
+          message: "private-warning",
+          details: { audioFailures: failures },
+        },
+      ];
+      throw new Error("failed");
+    };
+    const originalIsTTY = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    let output = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    try {
+      await expect(
+        renderLocal(projectDir, join(projectDir, "out.mp4"), {
+          fps: { num: 30, den: 1 },
+          quality: "standard",
+          format: "mp4",
+          gpu: false,
+          browserGpuMode: "software",
+          hdrMode: "auto",
+          quiet: mode.quiet,
+          throwOnError: true,
+        }),
+      ).rejects.toThrow("failed");
+      const lines = output.split("\n").filter((line) => line.startsWith("@hf-diagnostic "));
+      expect(lines).toHaveLength(mode.emits ? 1 : 0);
+      if (mode.emits) {
+        expect(
+          JSON.parse((lines[0] ?? "").slice("@hf-diagnostic ".length)).audioFailures[0].subprocess
+            .exitCode,
+        ).toBe(7);
+        expect(lines[0] ?? "").not.toMatch(/private-/);
+      }
+    } finally {
+      Object.defineProperty(process.stdout, "isTTY", { value: originalIsTTY, configurable: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it("logs only warnings and errors from the producer under --quiet", async () => {
     const options = {
       fps: { num: 30, den: 1 },

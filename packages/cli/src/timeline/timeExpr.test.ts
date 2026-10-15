@@ -33,6 +33,7 @@ const row: TimelineRow = {
   pendingReason: null,
   laneError: null,
   syncOffsetFrames: null,
+  mediaStart: 0,
 };
 
 describe("parseTimeExpression", () => {

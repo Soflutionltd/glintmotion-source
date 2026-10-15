@@ -48,7 +48,18 @@ const CATALOG_FONT_REASON =
 const DESIGN_NOTES_REASON =
   "plan and contract notes are working notes kept out of the repo; docs/contracts/ and docs/plans/ are gitignored";
 
+const INSPECTOR_TOOLS_REASON =
+  "the inspector ships the capability, not agent tools; each harness defines its own tool names, descriptions and schemas";
+
 export const ALLOWED_DELETIONS = new Map([
+  ["packages/inspector/src/mcp.ts", INSPECTOR_TOOLS_REASON],
+  ["packages/inspector/src/outputSchemas.ts", INSPECTOR_TOOLS_REASON],
+  ["packages/inspector/src/tools.ts", INSPECTOR_TOOLS_REASON],
+  ["packages/inspector/tests/outputSchemas.ts", INSPECTOR_TOOLS_REASON],
+  [
+    "packages/inspector/INSPECT-TIMELINE.md",
+    "described the deleted MCP tool; the README's Timeline section covers POST /timeline",
+  ],
   [
     "docs/public/catalog/vendor/BufferGeometryUtils.json",
     "bundled into three-modules.json so catalog scripts run under the docs host policy",
@@ -1152,6 +1163,10 @@ export const ALLOWED_DELETIONS = new Map([
   ["docs/contracts/2026-10-02-thumbnail-document-lifetime.html", DESIGN_NOTES_REASON],
   ["docs/contracts/2026-10-05-transcribe-language-progress.html", DESIGN_NOTES_REASON],
   ["docs/plans/2026-09-26-image-thumbnails.md", DESIGN_NOTES_REASON],
+  [
+    "packages/engine/src/services/frameCapture-wslFullChrome.test.ts",
+    "tests the WSL full-Chrome GPU fallback, replaced by the probe without WAYLAND_DISPLAY (frameCapture-wslWayland.test.ts)",
+  ],
 ]);
 
 export function parseBase(argv, fallback = "origin/main") {

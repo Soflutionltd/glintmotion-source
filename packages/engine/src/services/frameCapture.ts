@@ -49,6 +49,7 @@ import {
   forceReleaseBrowser,
   buildChromeArgs,
   resolveBrowserGpuMode,
+  captureWithoutWaylandDisplay,
   resolveHeadlessShellPath,
   compositionRequiresWebGpu,
   assertWebGpuAdapterAvailable,
@@ -1330,7 +1331,8 @@ export async function createCaptureSession(
     gpuConfig,
   );
 
-  const browserLease = await acquireBrowser(chromeArgs, config);
+  const withoutWaylandDisplay = await captureWithoutWaylandDisplay(resolvedGpuMode);
+  const browserLease = await acquireBrowser(chromeArgs, { ...config, withoutWaylandDisplay });
   return constructCaptureSessionWithRollback({
     browserLease,
     serverUrl,

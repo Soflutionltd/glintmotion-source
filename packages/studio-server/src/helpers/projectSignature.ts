@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync, type Stats } from "node:fs";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isAtomicTempPath } from "@hyperframes/core/atomic-file";
+import { PREVIEW_IGNORED_DIRS } from "@hyperframes/core/project-folders";
 import type { ResolvedProject, StudioApiAdapter } from "../types.js";
 
 const SIGNATURE_TEXT_EXTENSIONS = new Set([
@@ -16,22 +17,6 @@ const SIGNATURE_TEXT_EXTENSIONS = new Set([
   ".svg",
   ".ts",
   ".tsx",
-]);
-const SIGNATURE_EXCLUDED_DIRS = new Set([
-  ".cache",
-  ".git",
-  ".hyperframes",
-  ".next",
-  ".thumbnails",
-  ".transcode-cache",
-  ".vite",
-  ".waveform-cache",
-  "build",
-  "coverage",
-  "dist",
-  "node_modules",
-  "outputs",
-  "renders",
 ]);
 const MAX_SIGNATURE_TEXT_BYTES = 2_000_000;
 export const STUDIO_SIGNATURE_MANIFEST_PATHS = [
@@ -72,7 +57,7 @@ export function affectsProjectSignature(projectDir: string, changedPath: string)
   if (isRenderOutput(projectDir, changedPath, readRenderOutputsOrNone(projectDir))) return false;
   const segments = relativePath.split(sep);
   if (STUDIO_SIGNATURE_MANIFEST_PATHS.includes(segments.join("/") as never)) return true;
-  return !segments.some((segment) => SIGNATURE_EXCLUDED_DIRS.has(segment));
+  return !segments.some((segment) => PREVIEW_IGNORED_DIRS.has(segment));
 }
 
 interface ProjectSignatureFile {
@@ -106,7 +91,7 @@ function isTextContentEligible(file: string, size: number): boolean {
 }
 
 const isSkippedEntry = (entry: string) =>
-  SIGNATURE_EXCLUDED_DIRS.has(entry) || isAtomicTempPath(entry);
+  PREVIEW_IGNORED_DIRS.has(entry) || isAtomicTempPath(entry);
 
 function signatureEntryStat(
   projectDir: string,

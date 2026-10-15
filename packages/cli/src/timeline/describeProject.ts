@@ -71,6 +71,7 @@ export interface TimelineRow extends ClipFact {
   children: RowPointer[];
   /** Signed frames from its `data-sync-origin` partner (+ = late); `null` unpaired or rates differ. */
   syncOffsetFrames: number | null;
+  mediaStart: number | null;
 }
 
 export interface RowPointer {
@@ -330,6 +331,9 @@ function describeRowFields(scope: DocScope, node: DomNode, timing: RowTiming): C
     elementId: el.id || null,
     hfId: el.getAttribute("data-hf-id"),
     syncOffsetFrames: syncOffsetOf(el, scope.fps),
+    mediaStart: /^(video|audio)$/.test(kind)
+      ? readMediaOffsetSeconds((name) => el.getAttribute(name))
+      : null,
   };
 }
 
@@ -378,7 +382,9 @@ async function readSubComposition(
 function cutRow(row: ClipDraft, slots: readonly HostSlot[]): ClipDraft[] {
   const kept = cutToHostSlots({ start: row.absStart, end: row.absEnd }, slots);
   if (kept.end === kept.start && row.absEnd > row.absStart) return [];
-  return [{ ...row, absStart: roundMs(kept.start), absEnd: roundMs(kept.end) }];
+  const skipped = (kept.start - row.absStart) * (row.playbackRate ?? 1);
+  const mediaStart = row.mediaStart === null ? null : roundMs(row.mediaStart + skipped);
+  return [{ ...row, absStart: roundMs(kept.start), absEnd: roundMs(kept.end), mediaStart }];
 }
 
 /** The file's real path when it is a regular file inside the project (symlinks resolved), else null. */

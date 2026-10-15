@@ -16,6 +16,7 @@ export type LayoutIssueCode =
   | "canvas_overflow"
   | "container_overflow"
   | "content_overlap"
+  | "visibility_escapes_segment"
   | "text_occluded"
   | "text_not_painted"
   | "caption_zone_collision"
@@ -203,6 +204,7 @@ const PERSISTENCE_TIERED_CODES: ReadonlySet<LayoutIssueCode> = new Set([
   "canvas_overflow",
   "container_overflow",
   "content_overlap",
+  "visibility_escapes_segment",
   "text_occluded",
   "escaped_container",
   "panel_out_of_canvas",

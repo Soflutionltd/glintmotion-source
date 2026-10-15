@@ -1,3 +1,4 @@
+import { audioFailureDiagnostics } from "@hyperframes/engine";
 // fallow-ignore-file unused-type circular-dependency code-duplication complexity
 /**
  * Render Orchestrator Service
@@ -3387,6 +3388,7 @@ async function executeRenderPipeline(input: {
             message: `Audio mix failed; output would be video-only: ${audioResult.audioError}`,
             details: {
               mediaType: "audio",
+              audioFailures: audioFailureDiagnostics(audioFailures),
               failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
               failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
               failureOwner,

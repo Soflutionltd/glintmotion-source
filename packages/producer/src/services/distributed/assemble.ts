@@ -39,6 +39,7 @@ import {
   appendRenderProvenanceArgs,
   applyFaststart,
   describeFfmpegFailure,
+  getEncoderPreset,
   MIXED_AUDIO_FILENAME,
   muxVideoWithAudio,
   resolveConfig,
@@ -49,7 +50,7 @@ import { defaultLogger, type ProducerLogger } from "../../logger.js";
 import { formatExportFrameName } from "../../utils/paths.js";
 import { padOrTrimAudioToVideoFrameCount } from "../render/audioPadTrim.js";
 import { encoderFailureError } from "../render/encoderInterruption.js";
-import type { ChunkSliceJson } from "../render/stages/freezePlan.js";
+import type { ChunkSliceJson, LockedRenderConfig } from "../render/stages/freezePlan.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
 import { validatePlanV2MaterializedTarget } from "./planV2.js";
 import type { DistributedFormat } from "./shared.js";
@@ -79,6 +80,16 @@ interface PlanJsonForAssemble {
     height: number;
     format: DistributedFormat;
   };
+}
+
+type CfrRateControlSource = Partial<Pick<LockedRenderConfig, "quality" | "crf" | "bitrate">>;
+
+export function cfrRateControlArgs(locked: CfrRateControlSource): string[] {
+  const preset = getEncoderPreset(locked.quality ?? "standard", "mp4");
+  if (locked.crf == null && locked.bitrate) {
+    return ["-preset", preset.preset, "-b:v", locked.bitrate];
+  }
+  return ["-preset", preset.preset, "-crf", String(locked.crf ?? preset.quality)];
 }
 
 /**
@@ -112,7 +123,7 @@ export async function assemble(
      * duration lands on the requested `frameCount / fps` to ms
      * precision, with no PTS-derived drift). Trade-off: ~2-5x the
      * stitch time for a 60s 1080p clip plus second-generation H.264
-     * quality loss (negligible at `-crf 18` but non-zero). Default
+     * quality loss (at the chunks' own CRF or bitrate, non-zero). Default
      * `false` preserves the existing `-c copy` behavior. mp4 only
      * (libx264); webm / mov pass through unchanged because their
      * stream-copy paths don't exhibit the same avg-frame-rate drift.
@@ -266,9 +277,9 @@ export async function assemble(
       if (!existsSync(encoderJsonPath)) {
         throw new Error(`[assemble] planDir missing meta/encoder.json: ${encoderJsonPath}`);
       }
-      const encoderJson = JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as {
-        encoder?: string;
-      };
+      const encoderJson = JSON.parse(
+        readFileSync(encoderJsonPath, "utf-8"),
+      ) as CfrRateControlSource & { encoder?: string };
       if (encoderJson.encoder === "libx265-software") {
         throw new Error(
           `[assemble] cfr=true is not yet supported with codec: "h265". The ` +
@@ -282,10 +293,7 @@ export async function assemble(
         concatOutputPath,
         "-c:v",
         "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "18",
+        ...cfrRateControlArgs(encoderJson),
         "-pix_fmt",
         "yuv420p",
         "-fps_mode",

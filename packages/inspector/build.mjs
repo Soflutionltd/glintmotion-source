@@ -25,8 +25,23 @@ const node = { bundle: true, platform: "node", format: "esm", target: "node22", 
 await Promise.all([
   build({ ...node, entryPoints: [at("./src/live.ts")], outfile: at("./dist/live.js") }),
   build({ ...node, entryPoints: [at("./src/service.ts")], outfile: at("./dist/service.js") }),
-  build({ ...node, entryPoints: [at("./src/server.ts")], outfile: at("./dist/server.js") }),
-  build({ ...node, entryPoints: [at("./src/mcp.ts")], outfile: at("./dist/mcp.js") }),
+  build({
+    ...node,
+    entryPoints: [at("./src/server.ts")],
+    outfile: at("./dist/server.js"),
+    banner: { js: `#!/usr/bin/env node\n${banner.js}` },
+    plugins: [
+      {
+        name: "external-service",
+        setup(build) {
+          build.onResolve({ filter: /^\.\/service$/ }, () => ({
+            path: "./service.js",
+            external: true,
+          }));
+        },
+      },
+    ],
+  }),
   build({
     entryPoints: [at("./src/liveRuntime.ts")],
     outfile: at("./dist/inspection.js"),

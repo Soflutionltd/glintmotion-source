@@ -12,6 +12,7 @@ vi.mock("../telemetry/events.js", () => ({
 
 import { contrastRatio, parseColorRGBA } from "./contrast-bg.js";
 import { createCheckCommand, parseCheckRange } from "./check.js";
+import { CheckDeadlineError } from "../utils/checkDeadline.js";
 import { trackCommandFailures } from "../utils/command-failure-tracking.js";
 import type { CommandDef } from "citty";
 
@@ -1610,6 +1611,28 @@ describe("check pipeline", () => {
     expect(noErrors).not.toHaveBeenCalled();
   });
 
+  it("reports the total deadline during crops while retaining the audit failure", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
+      }),
+      { snapshots: true },
+      {
+        captureFindingCrops: async () => {
+          throw new CheckDeadlineError();
+        },
+      },
+    );
+    expect(report.ok).toBe(false);
+    expect(report.layout.errorCount).toBeGreaterThan(0);
+    expect(report.runtime.findings).toContainEqual(
+      expect.objectContaining({
+        code: "check_runtime_failure",
+        message: "Check did not finish within its deadline.",
+      }),
+    );
+  });
+
   it("--strict flips a warnings-only result from exit 0 to exit 1", async () => {
     const warningDriver = () =>
       fakeDriver({
@@ -1946,6 +1969,7 @@ describe("sampled finding reporting", () => {
           bbox: { x: 500, y: 20, width: 300, height: 80 },
         },
       ],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

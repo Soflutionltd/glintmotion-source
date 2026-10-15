@@ -34,6 +34,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
+import { cancelSimulatorTake } from "./takes.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { probeMotion } from "./motion-probe.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
@@ -1109,5 +1110,6 @@ app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   stopStudio();
   renders.stopAll();
+  cancelSimulatorTake();
   accountRun?.child.kill("SIGTERM");
 });

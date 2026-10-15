@@ -2,6 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
+import {
+  cancelSimulatorTake,
+  DEFAULT_FPS,
+  fitVideoIntoScene,
+  MAX_TAKE_SECONDS,
+  saveTake,
+  startSimulatorTake,
+  stopSimulatorTake,
+} from "./takes.mjs";
 import { MAX_SERIES, SERIES_FILE } from "./templates.mjs";
 
 /** Engine commands an agent may run. Rendering has its own job tool; the rest open UIs, accounts or the network. */
@@ -45,6 +54,14 @@ const SHARE_FOLDERS = ["renders", "snapshots"];
 const SIGNED_UPLOAD_PATH = "/storage/v1/object/upload/sign/";
 const UPLOAD_TYPES = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const TAKE_ACTIONS = ["start", "stop", "cancel"];
+const TAKE_FIT_PROPERTIES = {
+  video: { type: "string", description: "id of the <video> element in the scene that plays the take." },
+  composition: { type: "string", description: "Project-relative composition file. Default index.html." },
+  name: { type: "string", description: "File name for the take, e.g. 'switch'. Saved as <name>.mp4." },
+  from: { type: "number", minimum: 0, default: 0, description: "Skip this many seconds at the start of the file." },
+  fps: { type: "number", minimum: 1, maximum: 120, default: DEFAULT_FPS },
+};
 
 export const text = (value) => ({
   content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
@@ -249,6 +266,42 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "glintmotion_fit_video",
+    description: [
+      "Put a video file into a scene's <video id>: encoded to that element's data-duration (the last frame is",
+      "held when the file is shorter, the end is cut when it is longer), at the previous take's size when the",
+      "framing matches, constant frame rate, no audio. Saved next to the previous take (else assets/rec/); the",
+      "element's src and the default of its data-var-src variable then point at it. Call inside a glintmotion_session.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Project-relative path, or an absolute path on this Mac." },
+        ...TAKE_FIT_PROPERTIES,
+      },
+      required: ["source", "video"],
+    },
+  },
+  {
+    name: "glintmotion_simulator_take",
+    description: [
+      "Film the iOS Simulator for a scene. start records the booted simulator (udid when several are booted)",
+      "and returns once recording has begun; drive the app (sim-mirror or another tool); stop ends the take.",
+      "With `video`, stop fits the take into that <video id> like glintmotion_fit_video. Without it, the take is",
+      "saved under assets/rec/ at its real length: simctl writes no frame while the screen is still, so the last",
+      `frame is held up to the moment of stop. cancel drops the take. A take stops itself after ${MAX_TAKE_SECONDS} s.`,
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: TAKE_ACTIONS },
+        udid: { type: "string", description: "For start: the simulator to film. Default: the only booted one." },
+        ...TAKE_FIT_PROPERTIES,
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "glintmotion_generate_music",
     description: [
       "Compose an instrumental music bed with ElevenLabs (key set by the user in the Music panel),",
@@ -439,6 +492,7 @@ export const MCP_INSTRUCTIONS = [
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
+  "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
 ].join("\n");
 
@@ -711,6 +765,54 @@ export function createAgentTools(app) {
     return run.code === 0 ? text(json) : { ...text(json), isError: true };
   }
 
+  function fitOptions({ video, composition, name, from, fps }) {
+    return {
+      projectDir: app.projectDir(),
+      video,
+      composition: composition ?? "index.html",
+      name,
+      from: clampNumber(from, 0, 3600, 0),
+      fps: clampNumber(fps, 1, 120, DEFAULT_FPS),
+    };
+  }
+
+  async function fitVideo(input) {
+    if (!input.source || !input.video) return failure("source and video are required.");
+    return text(await fitVideoIntoScene({ ...fitOptions(input), source: String(input.source) }));
+  }
+
+  async function simulatorTake(input) {
+    switch (input.action) {
+      case "start":
+        return text({
+          recording: true,
+          ...(await startSimulatorTake({ udid: input.udid })),
+          next: "Drive the simulator now, then call glintmotion_simulator_take with action 'stop'.",
+        });
+      case "stop": {
+        const options = fitOptions(input);
+        const take = await stopSimulatorTake();
+        try {
+          const saved = input.video
+            ? await fitVideoIntoScene({ ...options, source: take.file, fallbackName: `take-${stamp()}` })
+            : await saveTake({ ...options, source: take.file, seconds: take.seconds });
+          return text({
+            ...saved,
+            device: take.device,
+            recordedSeconds: take.seconds,
+            ...(take.autoStopped && { autoStopped: `stopped at ${MAX_TAKE_SECONDS} s` }),
+          });
+        } finally {
+          rmSync(take.work, { recursive: true, force: true });
+        }
+      }
+      case "cancel":
+        return text({ cancelled: cancelSimulatorTake() });
+      default:
+        return failure(`action is one of ${TAKE_ACTIONS.join(", ")}.`);
+    }
+  }
+
   async function music({ prompt, seconds, start, track, place }) {
     const path = await app.generateMusic({ prompt, seconds });
     if (place === false) return text({ path });
@@ -841,6 +943,8 @@ export function createAgentTools(app) {
     glintmotion_motion_check: motionCheck,
     glintmotion_contact_sheet: contactSheet,
     glintmotion_inspect_media: inspectMedia,
+    glintmotion_fit_video: fitVideo,
+    glintmotion_simulator_take: simulatorTake,
     glintmotion_generate_music: music,
     glintmotion_render: render,
     glintmotion_render_status: renderStatus,

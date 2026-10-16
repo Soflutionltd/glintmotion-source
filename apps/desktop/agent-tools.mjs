@@ -13,6 +13,15 @@ import {
   stopSimulatorTake,
 } from "./takes.mjs";
 import { MAX_SERIES, SERIES_FILE } from "./templates.mjs";
+import {
+  analyzeReference,
+  readShots,
+  REFERENCE_DIR,
+  RESOLUTION_SIZES,
+  retimeShots,
+  snapCuts,
+  writeReferenceProject,
+} from "./reference.mjs";
 
 /** Engine commands an agent may run. Rendering has its own job tool; the rest open UIs, accounts or the network. */
 export const CLI_COMMANDS = [
@@ -56,6 +65,7 @@ const SIGNED_UPLOAD_PATH = "/storage/v1/object/upload/sign/";
 const UPLOAD_TYPES = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const TAKE_ACTIONS = ["start", "stop", "cancel"];
+const REFERENCE_ACTIONS = ["analyze", "build", "snap"];
 const TAKE_FIT_PROPERTIES = {
   video: { type: "string", description: "id of the <video> element in the scene that plays the take." },
   composition: { type: "string", description: "Project-relative composition file. Default index.html." },
@@ -328,6 +338,55 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "glintmotion_reference",
+    description: [
+      "Remake the structure of a reference edit (an ad or a viral video on this Mac) with your own footage.",
+      "analyze: its cuts, shot lengths, motion and colour of each shot, the music's bpm and beats, and an image",
+      "of every shot (or 24 spread across it) so you can see what each one shows.",
+      "build: the same, then a new project cut exactly like the reference: one <video id=\"shot-NN\"> per shot",
+      "on one track, each holding a solid-colour placeholder, and reference/analysis.json. Only these numbers",
+      "and the shot image are kept, never the reference's footage or sound.",
+      "snap: in the open project, move each cut onto the nearest beat of its music track (call inside a",
+      "glintmotion_session, after the music is placed). Then fill each shot with glintmotion_fit_video or",
+      "glintmotion_simulator_take stop, passing video and name both set to the shot id.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: REFERENCE_ACTIONS },
+        source: { type: "string", description: "For analyze and build: absolute path of the reference video." },
+        sensitivity: {
+          type: "string",
+          enum: ["low", "normal", "high"],
+          default: "normal",
+          description: "For analyze and build: high finds subtler cuts, low only hard ones.",
+        },
+        name: { type: "string", description: "For build: project folder name." },
+        resolution: {
+          type: "string",
+          enum: Object.keys(RESOLUTION_SIZES),
+          description: "For build: the format of the new project. Default: the closest to the reference.",
+        },
+        duration: {
+          type: "number",
+          minimum: 1,
+          maximum: 600,
+          description: "For build: total length in seconds; every cut is scaled in proportion. Default: the reference's.",
+        },
+        parent: { type: "string", description: "For build: absolute folder to create it in. Default ~/Movies/Glintmotion." },
+        open: { type: "boolean", default: true, description: "For build." },
+        tolerance: {
+          type: "number",
+          minimum: 0.01,
+          maximum: 0.5,
+          default: 0.15,
+          description: "For snap: the furthest a cut may move to reach a beat (s).",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "glintmotion_generate_music",
     description: [
       "Compose an instrumental music bed with ElevenLabs (key set by the user in the Music panel),",
@@ -549,6 +608,7 @@ export const MCP_INSTRUCTIONS = [
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
+  "Remake a reference edit: glintmotion_reference analyze (look at the shot image), build, glintmotion_generate_music at the reference's bpm for the whole duration, glintmotion_reference snap inside a session, then fill each shot-NN with app footage (glintmotion_fit_video or glintmotion_simulator_take, video and name = the shot id), then check and a contact sheet.",
   "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded. Another language: start with locale and app, stop with output and rewire false.",
   "Effects: glintmotion_effects searches the Glintmotion Effects catalog (shader transitions such as gl-cube, gl-wind…), glintmotion_add_effect installs one; a transition then loads vendor/glintmotion/hyper-shader.js in place of the HyperShader CDN script, plus its own file. The HyperFrames catalog stays on glintmotion_cli catalog/add.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
@@ -897,6 +957,103 @@ export function createAgentTools(app) {
     }
   }
 
+  const runBeats = (dir) => runCaptured(["beats", "--json"], dir, CLI_TIMEOUT_S);
+
+  function referenceFile(source) {
+    const value = String(source ?? "");
+    if (!isAbsolute(value)) throw new Error("source must be the absolute path of the reference video.");
+    if (!existsSync(value) || !statSync(value).isFile()) throw new Error(`No file at ${value}.`);
+    return value;
+  }
+
+  function shotList(shots) {
+    return shots.map(({ id, start, duration, motion, color }) => ({ id, start, duration, motion, color }));
+  }
+
+  async function referenceAnalysis({ source, sensitivity }, work) {
+    const sheet = join(work, "shots.jpg");
+    const analysis = await analyzeReference({ file: referenceFile(source), sheet, sensitivity: sensitivity ?? "normal", runBeats });
+    return { analysis, sheet };
+  }
+
+  async function reference(input) {
+    if (input.action === "snap") return snapReference(input);
+    if (input.action !== "analyze" && input.action !== "build") {
+      return failure(`action is one of ${REFERENCE_ACTIONS.join(", ")}.`);
+    }
+    const work = mkdtempSync(join(tmpdir(), "glintmotion-reference-sheet-"));
+    try {
+      const { analysis, sheet } = await referenceAnalysis(input, work);
+      if (input.action === "analyze") {
+        return { content: [{ type: "text", text: JSON.stringify(analysis, null, 2) }, image(readFileSync(sheet), "image/jpeg")] };
+      }
+
+      const resolution = input.resolution ?? analysis.resolution;
+      if (!RESOLUTION_SIZES[resolution]) return failure(`resolution is one of ${Object.keys(RESOLUTION_SIZES).join(", ")}.`);
+      const duration = input.duration === undefined ? undefined : clampNumber(input.duration, 1, 600, analysis.durationSeconds);
+      const parent = input.parent === undefined ? app.defaultParent : String(input.parent);
+      if (!isAbsolute(parent)) return failure("parent must be an absolute path.");
+      if (!String(input.name ?? "").trim()) return failure("build needs a project name.");
+      const dir = await app.createProject({ name: input.name, parent, resolution });
+      const built = await writeReferenceProject({ dir, analysis, resolution, duration, title: String(input.name) });
+      writeFileSync(join(dir, REFERENCE_DIR, "shots.jpg"), readFileSync(sheet));
+      if (input.open !== false) await app.openProject(dir);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                path: dir,
+                opened: input.open !== false,
+                resolution,
+                durationSeconds: built.durationSeconds,
+                bpm: analysis.bpm,
+                cutsOnBeat: analysis.cutsOnBeat,
+                shots: shotList(built.shots),
+                sheetShots: analysis.sheetShots,
+                next: [
+                  `glintmotion_generate_music for ${built.durationSeconds} s${analysis.bpm ? ` at about ${analysis.bpm} bpm` : ""}.`,
+                  "glintmotion_session begin, then glintmotion_reference snap so the cuts land on its beats.",
+                  "Fill each shot: glintmotion_fit_video (or glintmotion_simulator_take stop) with video and name set to the shot id.",
+                ],
+              },
+              null,
+              2,
+            ),
+          },
+          image(readFileSync(sheet), "image/jpeg"),
+        ],
+      };
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  async function snapReference({ tolerance }) {
+    const dir = app.projectDir();
+    const composition = join(dir, "index.html");
+    const html = readFileSync(composition, "utf-8");
+    const shots = readShots(html);
+    if (shots.length < 2) return failure('The open project has no shot-NN videos. Make one with glintmotion_reference build.');
+    const run = await runBeats(dir);
+    const report = parseJson(run.stdout);
+    if (run.code !== 0 || typeof report?.file !== "string") {
+      return failure(`No beats to snap to: ${tail(run.stderr.trim() || run.stdout.trim(), 800)}`);
+    }
+    const beatFile = join(dir, normalize(report.file));
+    const beats = (JSON.parse(readFileSync(beatFile, "utf-8")).beats ?? []).map((beat) => beat.time).filter(Number.isFinite);
+    const snapped = snapCuts(shots, beats, clampNumber(tolerance, 0.01, 0.5, 0.15));
+    if (snapped.moved.length) writeFileSync(composition, retimeShots(html, snapped.shots));
+    return text({
+      bpm: report.bpm ?? null,
+      beats: beats.length,
+      moved: snapped.moved,
+      unchanged: shots.length - 1 - snapped.moved.length,
+      shots: snapped.shots.map(({ id, start, duration }) => ({ id, start, duration })),
+    });
+  }
+
   async function music({ prompt, seconds, start, track, place }) {
     const path = await app.generateMusic({ prompt, seconds });
     if (place === false) return text({ path });
@@ -1029,6 +1186,7 @@ export function createAgentTools(app) {
     glintmotion_inspect_media: inspectMedia,
     glintmotion_fit_video: fitVideo,
     glintmotion_simulator_take: simulatorTake,
+    glintmotion_reference: reference,
     glintmotion_generate_music: music,
     glintmotion_render: render,
     glintmotion_render_status: renderStatus,

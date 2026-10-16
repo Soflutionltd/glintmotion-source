@@ -415,7 +415,7 @@ export const AGENT_TOOLS = [
     name: "glintmotion_upload",
     description: [
       "Send a file from the project's renders/ or snapshots/ folder to a signed upload URL, e.g. the",
-      "upload_url from Sociomator's create_media_upload, then pass its media_url to create_post.",
+      "upload URL a publishing service's MCP hands out, then give that service the media URL it returns.",
       "Only Supabase Storage signed upload URLs are accepted; MP4, MOV or JPEG up to 50 MB.",
     ].join(" "),
     inputSchema: {
@@ -513,7 +513,7 @@ export const MCP_INSTRUCTIONS = [
   "5. Verify: glintmotion_check (fix: true applies the findings marked fixable), glintmotion_motion_check when text moves, then a contact sheet. Fix what they show before going on.",
   "6. glintmotion_session end.",
   "7. Export: glintmotion_render (background job; poll glintmotion_render_status), then glintmotion_deliver for a Reel or Post file.",
-  "8. Publish: Sociomator's create_media_upload, glintmotion_upload with its upload_url, then create_post with its media_url.",
+  "8. Publish: ask the publishing service's MCP for a signed upload URL, glintmotion_upload to it, then give the service the returned media URL.",
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",

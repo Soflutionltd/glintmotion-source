@@ -129,7 +129,11 @@ export async function resolveItemWithDependencies(
   name: string,
   options: ResolveOptions = {},
 ): Promise<RegistryItem[]> {
-  const entries = await listRegistryItems(undefined, options);
+  let entries = await listRegistryItems(undefined, options);
+  // A name the cached manifest lacks may have been published since it was cached.
+  if (!options.skipCache && !entries.some((e) => e.name === name)) {
+    entries = await listRegistryItems(undefined, { ...options, skipCache: true });
+  }
   const entry = entries.find((e) => e.name === name);
   if (!entry) {
     const available = entries.map((e) => e.name).join(", ");

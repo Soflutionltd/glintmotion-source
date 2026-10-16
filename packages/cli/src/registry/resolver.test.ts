@@ -174,6 +174,18 @@ describe("registry resolver", () => {
       expect(items.map((item) => item.name)).toEqual(["alpha", "beta", "gamma"]);
     });
 
+    it("refetches a fresh cached manifest that lacks the requested name", async () => {
+      const baseUrl = uniqueBaseUrl();
+      await listRegistryItems(undefined, { baseUrl });
+      MANIFEST.items.push({ name: "delta", type: "hyperframes:example" });
+      try {
+        const items = await resolveItemWithDependencies("delta", { baseUrl });
+        expect(items.map((item) => item.name)).toEqual(["delta"]);
+      } finally {
+        MANIFEST.items.pop();
+      }
+    });
+
     it("returns a single item when there are no dependencies", async () => {
       const baseUrl = uniqueBaseUrl();
       const items = await resolveItemWithDependencies("alpha", { baseUrl });

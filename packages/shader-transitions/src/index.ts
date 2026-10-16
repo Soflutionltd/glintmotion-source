@@ -1,6 +1,11 @@
 export { init, type HyperShaderConfig, type TransitionConfig } from "./hyper-shader.js";
 export { isHtmlInCanvasCaptureSupported } from "./capture.js";
-export { SHADER_NAMES, type ShaderName } from "./shaders/registry.js";
+export {
+  SHADER_NAMES,
+  registerShader,
+  registeredShaderNames,
+  type ShaderName,
+} from "./shaders/registry.js";
 export {
   installPageSideCompositor,
   isPageSideCompositingSupported,

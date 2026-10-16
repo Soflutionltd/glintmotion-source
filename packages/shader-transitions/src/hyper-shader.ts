@@ -58,8 +58,8 @@ interface GsapTimeline {
 
 export interface TransitionConfig {
   time: number;
-  /** Omit to use a CSS crossfade instead of a WebGL shader. */
-  shader?: ShaderName;
+  /** Omit to use a CSS crossfade instead of a WebGL shader. Names added with registerShader work too. */
+  shader?: ShaderName | (string & {});
   duration?: number;
   ease?: string;
 }

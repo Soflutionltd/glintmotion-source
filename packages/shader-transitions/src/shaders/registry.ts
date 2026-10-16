@@ -241,11 +241,33 @@ const shaders: Record<string, ShaderDef> = {
 export type ShaderName = keyof typeof shaders;
 export const SHADER_NAMES = Object.keys(shaders) as ShaderName[];
 
+const registered = new Map<string, string>();
+const SHADER_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Adds a shader under `name`. `body` is GLSL that follows the shared header:
+ * it reads u_from, u_to, u_progress, u_resolution and the accent uniforms, and
+ * writes gl_FragColor in main(). Built-in names cannot be replaced.
+ */
+export function registerShader(name: string, body: string): void {
+  if (!SHADER_NAME.test(name)) throw new Error(`[HyperShader] Invalid shader name: "${name}"`);
+  if (Object.hasOwn(shaders, name))
+    throw new Error(`[HyperShader] "${name}" is a built-in shader and cannot be replaced`);
+  if (typeof body !== "string" || !/\bvoid\s+main\s*\(/.test(body))
+    throw new Error(`[HyperShader] Shader "${name}" needs a main() function`);
+  registered.set(name, H + body);
+}
+
+export function registeredShaderNames(): string[] {
+  return [...registered.keys()];
+}
+
 export function getFragSource(name: string): string {
   const def = Object.hasOwn(shaders, name) ? shaders[name] : undefined;
-  if (!def)
-    throw new Error(
-      `[HyperShader] Unknown shader: "${name}". Available: ${SHADER_NAMES.join(", ")}`,
-    );
-  return def.frag;
+  if (def) return def.frag;
+  const custom = registered.get(name);
+  if (custom) return custom;
+  throw new Error(
+    `[HyperShader] Unknown shader: "${name}". Available: ${[...SHADER_NAMES, ...registered.keys()].join(", ")}`,
+  );
 }

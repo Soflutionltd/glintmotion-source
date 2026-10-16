@@ -129,6 +129,8 @@ RUN timeout 300 bun install --frozen-lockfile \
 #
 # Keep the ordering dependency-correct: anything the core build reads must be
 # copied above it, and packages nothing above depends on stay below.
+# Core's build runs the shared post-emit import rewrite from the repo root.
+COPY scripts/rewrite-relative-import-extensions.mjs scripts/rewrite-relative-import-extensions.mjs
 COPY packages/parsers/ packages/parsers/
 COPY packages/lint/ packages/lint/
 COPY packages/studio-server/ packages/studio-server/

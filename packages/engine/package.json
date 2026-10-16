@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/engine",
-  "version": "0.8.160",
+  "version": "0.8.164",
   "description": "Seekable web page to video rendering engine (Puppeteer + FFmpeg)",
   "repository": {
     "type": "git",
@@ -80,7 +80,7 @@
     "types": "./dist/index.d.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node ../../scripts/rewrite-relative-import-extensions.mjs dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

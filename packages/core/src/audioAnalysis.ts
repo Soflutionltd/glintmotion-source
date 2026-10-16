@@ -123,7 +123,7 @@ export const signalDuration = (signal: AudioSignal): number =>
   (signal.channels[0]?.length ?? 0) / signal.sampleRate;
 
 /** Per-sample energy. Channels are squared first, so a reversed channel stays audible. */
-function energyMix(signal: AudioSignal): Float32Array {
+export function energyMix(signal: AudioSignal): Float32Array {
   const [first, ...rest] = signal.channels;
   if (!first) return new Float32Array(0);
   if (!rest.length) return first;

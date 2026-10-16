@@ -11,6 +11,7 @@ import { analyzeSignal } from "../analyze.js";
 import { apiProvider, type AudioApiRequest, type AudioApiResponse } from "./api.js";
 
 const RATE = 22_050;
+const UPLOAD_RATE = 16_000;
 
 /** Clicks every half second from 0.25 s: a grid the signal tracker finds. */
 function clicks(seconds: number): AudioSignal {
@@ -27,7 +28,9 @@ function clicks(seconds: number): AudioSignal {
 
 interface Received {
   method: string;
+  apiKey: string | undefined;
   authorization: string | undefined;
+  idempotencyKey: string | undefined;
   request: AudioApiRequest;
   audio: { type: string; bytes: Uint8Array };
 }
@@ -38,28 +41,67 @@ let reply: (request: AudioApiRequest) => { status: number; body: unknown } = () 
   status: 500,
   body: {},
 });
+let enveloped = true;
+let uploads = 0;
+let uploadedBytes = new Uint8Array();
 
-async function readForm(req: IncomingMessage) {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const form = await new Request("http://stand-in", {
-    method: "POST",
-    headers: { "content-type": req.headers["content-type"]! },
-    body: Buffer.concat(chunks),
-  }).formData();
-  const audio = form.get("audio") as Blob;
-  return {
-    request: JSON.parse(await (form.get("request") as Blob).text()) as AudioApiRequest,
-    audio: { type: audio.type, bytes: new Uint8Array(await audio.arrayBuffer()) },
-  };
+async function readBytes(req: IncomingMessage) {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
 }
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
-    const form = await readForm(req);
-    received.push({ method: req.method!, authorization: req.headers.authorization, ...form });
+    const bytes = await readBytes(req);
+    if (req.url === "/v3/assets/direct-uploads") {
+      expect(req.headers["x-api-key"]).toBe("test-key");
+      expect(req.headers.authorization).toBeUndefined();
+      const input = JSON.parse(bytes.toString());
+      expect(input).toMatchObject({ filename: "audio.wav", content_type: "audio/wav" });
+      uploads++;
+      res.writeHead(200, { "content-type": "application/json" }).end(
+        JSON.stringify({
+          data: {
+            asset_id: "uploaded-audio",
+            upload_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/put`,
+            upload_headers: { "content-type": "audio/wav" },
+          },
+        }),
+      );
+      return;
+    }
+    if (req.url === "/put") {
+      expect(req.method).toBe("PUT");
+      expect(req.headers["x-api-key"]).toBeUndefined();
+      expect(req.headers.authorization).toBeUndefined();
+      expect(req.headers["content-type"]).toBe("audio/wav");
+      uploadedBytes = new Uint8Array(bytes);
+      res.writeHead(200).end();
+      return;
+    }
+    if (req.url === "/v3/assets/uploaded-audio/complete") {
+      expect(req.headers["x-api-key"]).toBe("test-key");
+      res
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ data: { asset_id: "uploaded-audio" } }));
+      return;
+    }
+    expect(req.headers["content-type"]).toBe("application/json");
+    const form = {
+      request: JSON.parse(bytes.toString()) as AudioApiRequest,
+      audio: { type: "audio/wav", bytes: uploadedBytes },
+    };
+    received.push({
+      method: req.method!,
+      apiKey: req.headers["x-api-key"] as string | undefined,
+      authorization: req.headers.authorization,
+      idempotencyKey: req.headers["idempotency-key"] as string | undefined,
+      ...form,
+    });
     const { status, body } = reply(form.request);
-    res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+    const sent = status === 200 && enveloped ? { data: body } : body;
+    res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(sent));
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 });
@@ -68,6 +110,8 @@ afterAll(() => new Promise<void>((done) => server.close(() => done())));
 
 afterEach(() => {
   received = [];
+  uploads = 0;
+  enveloped = true;
   delete process.env.HYPERFRAMES_AUDIO_API_URL;
   delete process.env.HYPERFRAMES_AUDIO_API_KEY;
 });
@@ -92,6 +136,34 @@ describe("apiProvider", () => {
     expect(apiProvider.available!()).toEqual({ ok: true });
   });
 
+  it("refuses redirects without sending the API key to another origin", async () => {
+    const forwarded: string[] = [];
+    const destination = createServer((req, res) => {
+      forwarded.push(req.headers["x-api-key"]?.toString() ?? "");
+      res.writeHead(200).end("{}");
+    });
+    await new Promise<void>((done) => destination.listen(0, "127.0.0.1", done));
+    const address = destination.address();
+    if (!address || typeof address === "string") throw new Error("No destination port");
+    const redirect = createServer((_req, res) => {
+      res.writeHead(307, { location: `http://127.0.0.1:${address.port}/` }).end();
+    });
+    await new Promise<void>((done) => redirect.listen(0, "127.0.0.1", done));
+    try {
+      const source = redirect.address();
+      if (!source || typeof source === "string") throw new Error("No redirect port");
+      process.env.HYPERFRAMES_AUDIO_API_URL = `http://127.0.0.1:${source.port}/`;
+      process.env.HYPERFRAMES_AUDIO_API_KEY = "test-key";
+      await expect(apiProvider.analyze("beats", clicks(1), {})).rejects.toThrow();
+      expect(forwarded).toEqual([]);
+    } finally {
+      await Promise.all([
+        new Promise<void>((done) => redirect.close(() => done())),
+        new Promise<void>((done) => destination.close(() => done())),
+      ]);
+    }
+  });
+
   it("posts the audio and the capabilities, and snaps each answered beat onto the signal's own", async () => {
     configure();
     const signal = clicks(12);
@@ -103,6 +175,7 @@ describe("apiProvider", () => {
       body: {
         version: 1,
         source: "stand-in",
+        time_resolution_seconds: 1 / 32,
         beats: { times: answered },
         downbeats: { times: measured.filter((_, k) => k % 4 === 0).map((t) => t - 0.02), meter: 4 },
       } satisfies AudioApiResponse,
@@ -114,15 +187,18 @@ describe("apiProvider", () => {
 
     expect(received).toHaveLength(1);
     const [call] = received;
-    expect(call).toMatchObject({ method: "POST", authorization: "Bearer test-key" });
+    expect(call).toMatchObject({ method: "POST", apiKey: "test-key", authorization: undefined });
+    expect(call!.idempotencyKey).toMatch(
+      /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/,
+    );
     expect(call!.request).toEqual({
       version: 1,
       capabilities: ["beats", "downbeats"],
-      audio: { sampleRate: RATE, channels: 1, duration: 12 },
+      audio: { type: "asset_id", asset_id: "uploaded-audio" },
     });
     expect(call!.audio.type).toBe("audio/wav");
     expect(Buffer.from(call!.audio.bytes.subarray(0, 4)).toString()).toBe("RIFF");
-    expect(call!.audio.bytes.length).toBe(44 + 12 * RATE * 2);
+    expect(call!.audio.bytes.length).toBe(44 + 12 * UPLOAD_RATE * 2);
 
     expect(analysis.provenance).toEqual({ beats: "api", downbeats: "api", bpm: "api" });
     const beats = analysis.values.beats as { times: number[]; snap: object; source: string };
@@ -201,6 +277,9 @@ describe("apiProvider", () => {
       signalProvider,
     ]);
     expect(received.map((r) => r.request.capabilities)).toEqual([["sections"], ["describe"]]);
+    expect(new Set(received.map((r) => r.idempotencyKey)).size).toBe(2);
+    expect(uploads).toBe(1);
+    expect(received.every((r) => r.request.audio.asset_id === "uploaded-audio")).toBe(true);
     expect(analysis.values.sections).toMatchObject({
       spans: [
         { start: 0, end: beat, label: "intro" },
@@ -235,10 +314,96 @@ describe("apiProvider", () => {
     expect(garbled.warnings[0]).toContain("api failed (the service answered beats in a shape");
   });
 
-  it("never sends the key anywhere but the authorization header", async () => {
+  it("uploads the channels averaged to one at 16 kHz, with nothing above 8 kHz folded back in", async () => {
+    configure();
+    const rate = 44_100;
+    const tone = (hz: number) =>
+      Float32Array.from(
+        { length: 2 * rate },
+        (_, k) => 0.3 * Math.sin((2 * Math.PI * hz * k) / rate),
+      );
+    const [low, side, high] = [tone(440), tone(2_000), tone(9_000)];
+    const left = low.map((v, k) => v + side[k]! + high[k]!);
+    const right = low.map((v, k) => v - side[k]! + high[k]!);
+    reply = () => ({ status: 200, body: { version: 1, describe: { tags: [] } } });
+    await analyzeSignal(
+      { sampleRate: rate, channels: [left, right] },
+      { capabilities: ["describe"] },
+      [apiProvider],
+    );
+
+    const wav = Buffer.from(received[0]!.audio.bytes);
+    expect([wav.readUInt16LE(22), wav.readUInt32LE(24), wav.readUInt16LE(34)]).toEqual([
+      1,
+      UPLOAD_RATE,
+      16,
+    ]);
+    const samples = Array.from(
+      { length: (wav.length - 44) / 2 },
+      (_, k) => wav.readInt16LE(44 + 2 * k) / 32767,
+    );
+    const level = (hz: number) => {
+      let re = 0;
+      let im = 0;
+      samples.forEach((v, k) => {
+        re += v * Math.cos((2 * Math.PI * hz * k) / UPLOAD_RATE);
+        im += v * Math.sin((2 * Math.PI * hz * k) / UPLOAD_RATE);
+      });
+      return (2 * Math.hypot(re, im)) / samples.length;
+    };
+    expect(level(440)).toBeCloseTo(0.3, 2);
+    expect(level(2_000)).toBeLessThan(0.005);
+    expect(level(7_000)).toBeLessThan(0.005);
+  });
+
+  it.each([
+    { phase: Math.PI, quiet: 1, expected: 0.7 },
+    { phase: Math.PI * 0.9, quiet: 1, expected: 0.7 },
+    { phase: Math.PI, quiet: 0.8, expected: 0.7 },
+    { phase: Math.PI / 2, quiet: 1, expected: 0.7 / Math.sqrt(2) },
+    { phase: 0, quiet: 1, expected: 0.7 },
+  ])(
+    "preserves stereo energy for phase $phase and channel gain $quiet",
+    async ({ phase, quiet, expected }) => {
+      configure();
+      const rate = 44_100;
+      const left = Float32Array.from(
+        { length: rate },
+        (_, k) => 0.7 * quiet * Math.sin((2 * Math.PI * 440 * k) / rate),
+      );
+      const right = Float32Array.from(
+        { length: rate },
+        (_, k) => 0.7 * Math.sin((2 * Math.PI * 440 * k) / rate + phase),
+      );
+      reply = () => ({ status: 200, body: { version: 1, describe: { tags: [] } } });
+      await analyzeSignal(
+        { sampleRate: rate, channels: [left, right] },
+        { capabilities: ["describe"] },
+        [apiProvider],
+      );
+      const wav = Buffer.from(received[0]!.audio.bytes);
+      expect(wav.readUInt32LE(24)).toBe(UPLOAD_RATE);
+      let energy = 0;
+      for (let k = 0; k < UPLOAD_RATE; k++) energy += (wav.readInt16LE(44 + 2 * k) / 32767) ** 2;
+      expect(Math.sqrt((2 * energy) / UPLOAD_RATE)).toBeCloseTo(expected, 2);
+    },
+  );
+
+  it("reads an answer sent without the data envelope too", async () => {
+    configure();
+    enveloped = false;
+    reply = () => ({ status: 200, body: { version: 1, describe: { text: "bare", tags: [] } } });
+    const analysis = await analyzeSignal(clicks(2), { capabilities: ["describe"] }, [apiProvider]);
+    expect(analysis.values.describe).toEqual({ text: "bare", tags: [] });
+  });
+
+  it("never sends the key anywhere but the x-api-key header", async () => {
     configure();
     reply = () => ({ status: 401, body: { error: { message: "bad key" } } });
     const analysis = await analyzeSignal(clicks(8), { capabilities: ["describe"] }, [apiProvider]);
     expect(JSON.stringify(analysis)).not.toContain("test-key");
+    const [call] = received;
+    expect(call).toMatchObject({ apiKey: "test-key", authorization: undefined });
+    expect(JSON.stringify(call!.request)).not.toContain("test-key");
   });
 });

@@ -9,6 +9,83 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.8.164"
+  description="Released - 2026-10-16"
+  tags={["Release", "Producer", "Engine"]}
+>
+Website capture only connects to public addresses, including after a redirect. Audio tracks keep the mix order you wrote, and ffmpeg failures keep the line that explains why.
+
+## Fixes
+
+- **CLI:** Pin website capture connections to public peers ([8be76fc86cd](https://github.com/heygen-com/hyperframes/commit/8be76fc86cda5b2a77d0ee23b65f582e85376042), [#5668](https://github.com/heygen-com/hyperframes/pull/5668)).
+- **Producer:** An ffmpeg failure names how ffmpeg ended and keeps its last line ([c03532b285b](https://github.com/heygen-com/hyperframes/commit/c03532b285b00ce2e82900bc80a10cd1fb4c470b), [#5678](https://github.com/heygen-com/hyperframes/pull/5678)).
+- **Engine:** Preserve authored audio mix order ([8e17ee9300f](https://github.com/heygen-com/hyperframes/commit/8e17ee9300f0142d7c01f5a670c5ed3950ceed1e), [#5672](https://github.com/heygen-com/hyperframes/pull/5672)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.163...v0.8.164).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.163"
+  description="Released - 2026-10-16"
+  tags={["Release", "CLI", "Core", "Studio"]}
+>
+Website captures keep inline SVG logos whole, and timed SVG clips hide outside their window. Publishing now asks you to log in when it needs an account.
+
+## Features
+
+- **CLI:** Judge text behind a transparent video by its decoded alpha in check ([cea8aa8a7de](https://github.com/heygen-com/hyperframes/commit/cea8aa8a7dee9d669e47e4b488213008bbe305cd), [#5657](https://github.com/heygen-com/hyperframes/pull/5657)).
+- **CLI:** Render telemetry reports how busy the machine's CPU was ([0e9f380c2e2](https://github.com/heygen-com/hyperframes/commit/0e9f380c2e2295db4b88945a77cfa81001ac5c27), [#5646](https://github.com/heygen-com/hyperframes/pull/5646)).
+
+## Fixes
+
+- **CLI:** Ask to log in when publishing needs an account ([917ee5d3134](https://github.com/heygen-com/hyperframes/commit/917ee5d31342f8c8a4a14659679762489cafe665), [#5670](https://github.com/heygen-com/hyperframes/pull/5670)).
+- **Core:** Timed svg clips hide outside their window ([1ee6754f710](https://github.com/heygen-com/hyperframes/commit/1ee6754f7106335cc5533f7205bd3b7949ddb887), [#5661](https://github.com/heygen-com/hyperframes/pull/5661)).
+- **CLI:** Capture writes inline SVG logos whole and parakeet takes long audio ([0d6bdd453bb](https://github.com/heygen-com/hyperframes/commit/0d6bdd453bbcfae2280cf2b66f0b6b5afccc10ba), [#5662](https://github.com/heygen-com/hyperframes/pull/5662)).
+- **CLI:** Skip runtime by-products when fingerprinting a skill bundle ([08ee1bd5ad5](https://github.com/heygen-com/hyperframes/commit/08ee1bd5ad59987a7f2525222683e24ca30971f9), [#5654](https://github.com/heygen-com/hyperframes/pull/5654)).
+
+## Internal
+
+- **Studio:** Re-run an edit accuracy shard on a fresh runner when its runner is too slow ([a403ea1e8b2](https://github.com/heygen-com/hyperframes/commit/a403ea1e8b283c6bdcbe21b5cab2a2a50b5f35f3), [#5659](https://github.com/heygen-com/hyperframes/pull/5659)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.162...v0.8.163).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.162"
+  description="Released - 2026-10-15"
+  tags={["Release", "CLI"]}
+>
+Audio analysis uploads sound as an owned asset before requesting results. This matches the analysis service's asset-reference request format.
+
+## Fixes
+
+- **CLI:** Analyze finalized audio assets after direct upload ([34776f3de](https://github.com/heygen-com/hyperframes/commit/34776f3def039a540cdf8c23912fd3757a373008), [#5647](https://github.com/heygen-com/hyperframes/pull/5647)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.161...v0.8.162).
+</Update>
+
+<Update
+  label="HyperFrames v0.8.161"
+  description="Released - 2026-10-15"
+  tags={["Release", "CLI", "Build"]}
+>
+Find music beats without launching Chrome. TypeScript projects using NodeNext can now resolve the published package declarations.
+
+## Features
+
+- `hyperframes beats` uses the TypeScript beat tracker through FFmpeg decoding, without Chrome. Studio shares the tracker; low-confidence audio returns no beat grid. The saved beat-file format is unchanged. ([#5634](https://github.com/heygen-com/hyperframes/pull/5634))
+
+## Fixes
+
+- Resolve published TypeScript declarations with NodeNext module resolution across packages. ([#5532](https://github.com/heygen-com/hyperframes/pull/5532))
+
+## Full changelog
+
+https://github.com/heygen-com/hyperframes/compare/ec97816a921649fb0c0f43959e0db23d2fc039e2...v0.8.161
+
+</Update>
+
+<Update
   label="HyperFrames v0.8.160"
   description="Released - 2026-10-15"
   tags={["Release", "CLI", "Runtime", "Studio"]}

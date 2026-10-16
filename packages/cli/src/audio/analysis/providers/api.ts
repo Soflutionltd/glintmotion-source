@@ -1,3 +1,6 @@
+import { HyperframesCloudClient } from "../../../cloud/_gen/client.js";
+import { uploadAssetViaDirectUpload } from "../../../cloud/upload.js";
+import { randomUUID } from "node:crypto";
 import {
   medianInterval,
   rhythm,
@@ -12,19 +15,19 @@ import { AVAILABLE, encodeWav, perSignal, rounded, unavailable } from "./shared.
 /**
  * The audio analysis service contract.
  *
- * Request: `POST <HYPERFRAMES_AUDIO_API_URL>`, exactly as configured, with
- * `Authorization: Bearer <HYPERFRAMES_AUDIO_API_KEY>` and a `multipart/form-data` body of two parts:
- * - `request`: `application/json`, an {@link AudioApiRequest};
- * - `audio`: `audio/wav`, 16-bit PCM of the analyzed span, channels as decoded.
+ * Request: `POST <HYPERFRAMES_AUDIO_API_URL>`, exactly as configured, with `x-api-key: <HYPERFRAMES_AUDIO_API_KEY>`,
+ * a new `Idempotency-Key` per request, and an {@link AudioApiRequest} JSON body.
+ * The analyzed span is uploaded once as 16-bit PCM WAV, mono at 16 kHz, using the same origin
+ * public asset direct-upload and completion routes. The body references that finalized asset.
  *
- * Response: `200` with `application/json`, an {@link AudioApiResponse}. Every time is in seconds from the start of the
- * uploaded audio. A capability the service cannot answer is left out of the response. Any other status is a failure;
- * its body may be `{ "error": { "message": string } }`.
+ * Response: `200` with `application/json`, `{ "data": AudioApiResponse }`; a bare {@link AudioApiResponse} is read
+ * too. Every time is in seconds from the start of the uploaded audio. A capability the service cannot answer is left
+ * out of the response. Any other status is a failure; its body may be `{ "error": { "message": string } }`.
  */
 export interface AudioApiRequest {
   version: 1;
   capabilities: AudioApiCapability[];
-  audio: { sampleRate: number; channels: number; duration: number };
+  audio: { type: "asset_id"; asset_id: string };
 }
 
 export type AudioApiCapability = "beats" | "downbeats" | "sections" | "describe";
@@ -33,6 +36,8 @@ export interface AudioApiResponse {
   version: 1;
   /** What answered, as the service wants it reported. */
   source?: string;
+  /** The finest step the service's times resolve, in seconds. */
+  time_resolution_seconds?: number;
   beats?: { times: number[] };
   downbeats?: { times: number[]; meter?: number | null };
   sections?: { spans: { start: number; end: number; label?: string }[] };
@@ -43,6 +48,68 @@ const URL_ENV = "HYPERFRAMES_AUDIO_API_URL";
 const KEY_ENV = "HYPERFRAMES_AUDIO_API_KEY";
 const TIMEOUT_ENV = "HYPERFRAMES_AUDIO_API_TIMEOUT_MS";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const UPLOAD_RATE = 16_000;
+const SINC_ZEROS = 16;
+const ROLLOFF = 0.9;
+const SINC_STEPS = 512;
+const HANN_SINC = Float32Array.from({ length: SINC_ZEROS * SINC_STEPS + 2 }, (_, k) => {
+  const x = k / SINC_STEPS;
+  if (x >= SINC_ZEROS) return 0;
+  const sinc = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
+  return sinc * (0.5 + 0.5 * Math.cos((Math.PI * x) / SINC_ZEROS));
+});
+
+/** Windowed-sinc resampling with its cutoff just under the lower Nyquist, so nothing above it folds back in. */
+function resample(input: Float32Array, from: number, to: number): Float32Array {
+  if (from === to) return input;
+  const step = from / to;
+  const scale = Math.min(1, to / from) * ROLLOFF;
+  const reach = SINC_ZEROS / scale;
+  const output = new Float32Array(Math.round(input.length / step));
+  for (let i = 0; i < output.length; i++) {
+    const center = i * step;
+    const last = Math.min(input.length - 1, Math.floor(center + reach));
+    let sum = 0;
+    let weights = 0;
+    for (let n = Math.max(0, Math.ceil(center - reach)); n <= last; n++) {
+      const at = Math.abs(n - center) * scale * SINC_STEPS;
+      const k = Math.floor(at);
+      const weight = HANN_SINC[k]! + (at - k) * (HANN_SINC[k + 1]! - HANN_SINC[k]!);
+      sum += input[n]! * weight;
+      weights += weight;
+    }
+    output[i] = weights ? sum / weights : 0;
+  }
+  return output;
+}
+
+/** Preserve a channel when destructive interference removes over 90% of its energy. */
+function monoInput(channels: readonly Float32Array[]): Float32Array {
+  const mono = new Float32Array(channels[0]?.length ?? 0);
+  let loudest: Float32Array = mono;
+  let loudestEnergy = 0;
+  for (const channel of channels) {
+    let energy = 0;
+    for (let i = 0; i < mono.length; i++) {
+      const value = channel[i]!;
+      mono[i]! += value / channels.length;
+      energy += value * value;
+    }
+    if (energy > loudestEnergy) {
+      loudest = channel;
+      loudestEnergy = energy;
+    }
+  }
+  const monoEnergy = mono.reduce((energy, value) => energy + value * value, 0);
+  return monoEnergy < loudestEnergy * 0.1 ? loudest : mono;
+}
+
+function uploaded(signal: AudioSignal): AudioSignal {
+  return {
+    sampleRate: UPLOAD_RATE,
+    channels: [resample(monoInput(signal.channels), signal.sampleRate, UPLOAD_RATE)],
+  };
+}
 
 /** Beats and downbeats come from one request; the others each from their own. */
 const askedTogether = (capability: AudioApiCapability): AudioApiCapability[] =>
@@ -90,33 +157,54 @@ async function failure(response: Response): Promise<Error> {
   return new Error(`the service answered ${response.status}${detail ? `: ${detail}` : ""}`);
 }
 
-async function ask(signal: AudioSignal, capabilities: AudioApiCapability[]) {
+const uploadedAsset = perSignal(async (analyzed: AudioSignal) => {
+  const { url, key, timeoutMs } = config();
+  if (!url || !key) throw new Error(`${URL_ENV} and ${KEY_ENV} must both be set`);
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const boundedFetch: typeof fetch = (input, init) =>
+    fetch(input, {
+      ...init,
+      redirect: "error",
+      signal: deadline,
+    });
+  const client = new HyperframesCloudClient({
+    baseUrl: new URL(url).origin,
+    getAuthHeaders: () => ({ "x-api-key": key }),
+    fetchImpl: boundedFetch,
+  });
+  const asset = await uploadAssetViaDirectUpload({
+    client,
+    bytes: new Uint8Array(encodeWav(uploaded(analyzed))),
+    filename: "audio.wav",
+    contentType: "audio/wav",
+    idempotencyKey: randomUUID(),
+    fetchImpl: boundedFetch,
+  });
+  return asset.asset_id;
+});
+
+async function ask(analyzed: AudioSignal, capabilities: AudioApiCapability[]) {
   const { url, key, timeoutMs } = config();
   if (!url || !key) throw new Error(`${URL_ENV} and ${KEY_ENV} must both be set`);
   const request: AudioApiRequest = {
     version: 1,
     capabilities,
-    audio: {
-      sampleRate: signal.sampleRate,
-      channels: signal.channels.length,
-      duration: (signal.channels[0]?.length ?? 0) / signal.sampleRate,
-    },
+    audio: { type: "asset_id", asset_id: await uploadedAsset(analyzed) },
   };
-  const form = new FormData();
-  form.append("request", new Blob([JSON.stringify(request)], { type: "application/json" }));
-  form.append(
-    "audio",
-    new Blob([new Uint8Array(encodeWav(signal))], { type: "audio/wav" }),
-    "audio.wav",
-  );
   const response = await fetch(url, {
     method: "POST",
-    headers: { authorization: `Bearer ${key}` },
-    body: form,
+    redirect: "error",
+    headers: {
+      "x-api-key": key,
+      "idempotency-key": randomUUID(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(request),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw await failure(response);
-  return (await response.json()) as AudioApiResponse;
+  const body = (await response.json()) as { data?: AudioApiResponse } | null;
+  return (body?.data ?? body ?? {}) as AudioApiResponse;
 }
 
 const requests = new Map<string, (signal: AudioSignal) => Promise<AudioApiResponse>>();

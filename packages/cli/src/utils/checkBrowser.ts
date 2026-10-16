@@ -1484,6 +1484,7 @@ const LAYOUT_ISSUE_CODES: readonly LayoutIssueCode[] = [
   "content_overlap",
   "visibility_escapes_segment",
   "text_occluded",
+  "video_alpha_unread",
   "text_not_painted",
   "caption_zone_collision",
   "frame_out_of_frame",

@@ -1,5 +1,5 @@
 /**
- * Sections from signal processing: band energies averaged into half-second blocks, a self-similarity matrix, and
+ * Sections from signal processing: band energies and chroma averaged into half-second blocks, a self-similarity matrix, and
  * Foote's checkerboard novelty, whose peaks are where the music changes. Boundaries snap to the nearest beat.
  */
 
@@ -47,14 +47,25 @@ function standardizeBands(blocks: number[][]): void {
   }
 }
 
-/** Band energies averaged over blocks, each band standardized over time and each block scaled to unit length. */
-function blockFeatures({ fps, bands }: BandFrames): number[][] {
+/** Block means of the band energies and of the log chroma, each part unit length within a block. */
+function blockParts({ fps, bands, chroma, chromaFps }: BandFrames): number[][] {
   const per = Math.max(1, Math.round(BLOCK_SECONDS * fps));
+  const chromaPer = Math.max(1, Math.round(BLOCK_SECONDS * chromaFps));
   const blocks: number[][] = [];
-  for (let start = 0; start + per <= bands.length; start += per)
-    blocks.push(meanOf(bands.slice(start, start + per)));
+  for (let start = 0, b = 0; start + per <= bands.length; start += per, b++) {
+    const pitch = meanOf(chroma.slice(b * chromaPer, (b + 1) * chromaPer)).map(Math.log1p);
+    blocks.push([...meanOf(bands.slice(start, start + per)), ...unit(pitch)]);
+  }
+  return blocks;
+}
+
+function blockFeatures(frames: BandFrames): number[][] {
+  const blocks = blockParts(frames);
   standardizeBands(blocks);
-  return blocks.map(unit);
+  const split = frames.bands[0]?.length ?? 0;
+  return blocks.map((block) =>
+    [...unit(block.slice(0, split)), ...unit(block.slice(split))].map((v) => v * Math.SQRT1_2),
+  );
 }
 
 function unit(vector: number[]): number[] {

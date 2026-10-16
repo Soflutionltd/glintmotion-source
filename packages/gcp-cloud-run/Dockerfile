@@ -153,7 +153,9 @@ RUN bun packages/aws-lambda/scripts/probe-webgpu-adapter.ts \
 # image continues from the already-proven binary and installed workspaces.
 FROM beginframe-contract AS runtime
 
-# Copy source for the packages the render path needs.
+# Copy source for the packages the render path needs, plus the shared post-emit
+# import rewrite their builds run.
+COPY scripts/rewrite-relative-import-extensions.mjs scripts/rewrite-relative-import-extensions.mjs
 COPY packages/core/ packages/core/
 COPY packages/engine/ packages/engine/
 COPY packages/producer/ packages/producer/

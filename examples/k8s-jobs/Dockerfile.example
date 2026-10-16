@@ -140,7 +140,9 @@ RUN npm install --global bun@1.4.2 && \
     bun install --frozen-lockfile
 
 # Bring in the source. Core's build generates files its source imports
-# (e.g. runtime-inline); the other packages run from source under bun.
+# (e.g. runtime-inline); the other packages run from source under bun. The
+# build also runs the shared post-emit import rewrite from the repo root.
+COPY scripts/rewrite-relative-import-extensions.mjs ./scripts/rewrite-relative-import-extensions.mjs
 COPY packages/core ./packages/core
 COPY packages/engine ./packages/engine
 COPY packages/lint ./packages/lint

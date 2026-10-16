@@ -152,21 +152,22 @@
 
         <div class="stats">
           <div class="stat">
-            <span class="stat-value">26 s</span>
-            <span class="stat-label">pour exporter logo-reel, contre 58 s au départ</span>
+            <span class="stat-value">34,5 s</span>
+            <span class="stat-label">pour exporter logo-reel, contre 54,8 s avec HyperFrames</span>
           </div>
           <div class="stat">
-            <span class="stat-value">−55 %</span>
-            <span class="stat-label">de temps d'export sur la même vidéo et le même Mac</span>
+            <span class="stat-value">−33 %</span>
+            <span class="stat-label">de temps d'export en moyenne sur 4 vidéos, face à HyperFrames</span>
           </div>
           <div class="stat">
-            <span class="stat-value">7,6 s</span>
+            <span class="stat-value">10,9 s</span>
             <span class="stat-label">pour rendre seulement 4 s d'une vidéo de 40 s</span>
           </div>
         </div>
         <p class="footnote">
-          Mesures sur logo-reel : 40 s, 1080×1920, 13 vidéos, son, 3D et modes de fusion. MacBook
-          Pro M2 Max, 12 cœurs.
+          Mesures du 16 octobre 2026 : Glintmotion 0.2.0 et HyperFrames 0.8.164, même Chrome et
+          même FFmpeg, trois passages par moteur, valeur du milieu. logo-reel : 40 s, 1080×1920,
+          13 vidéos, son, 3D et modes de fusion. MacBook Pro M2 Max, 12 cœurs.
         </p>
 
         <h2>Comment ça marche</h2>
@@ -197,7 +198,7 @@
           </li>
         </ol>
 
-        <h2>Ce qui change par rapport à la base</h2>
+        <h2>Ce qui rend l'export plus rapide</h2>
         <ul class="changes">
           <li>
             <h3>Encodage sur la puce graphique, par défaut</h3>
@@ -237,8 +238,8 @@
               </tr>
               <tr>
                 <th>Export de logo-reel</th>
-                <td class="is-ours">26 s</td>
-                <td>58 s</td>
+                <td class="is-ours">34,5 s</td>
+                <td>54,8 s (52,1 s avec <code>--gpu</code>)</td>
                 <td>Non mesuré : la vidéo serait à réécrire en React</td>
               </tr>
               <tr>
@@ -279,7 +280,7 @@
               </tr>
               <tr>
                 <th>Licence</th>
-                <td class="is-ours">Usage privé</td>
+                <td class="is-ours">PolyForm Noncommercial, code source public</td>
                 <td>Apache 2.0</td>
                 <td>Gratuite jusqu'à 3 salariés, payante au-delà</td>
               </tr>
@@ -319,8 +320,9 @@
         </p>
 
         <p class="credits">
-          Glintmotion est construit sur HyperFrames (HeyGen, licence Apache 2.0) et utilise GSAP.
-          Usage privé, à ne pas diffuser.
+          Glintmotion utilise GSAP. Son code source est public, sous licence PolyForm
+          Noncommercial : gratuit pour un usage personnel ou non commercial, contributions
+          bienvenues. Les licences du code tiers sont dans LICENSE.md.
         </p>
       </section>
     </main>

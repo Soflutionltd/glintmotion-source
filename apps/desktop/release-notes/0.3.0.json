@@ -1,0 +1,12 @@
+{
+  "title": "Refais le montage d'une vidéo qui te plaît",
+  "summary": "Donne une vidéo de référence : Glintmotion repère ses coupes, leur rythme et son tempo, puis crée un projet découpé pareil. L'agent cale les coupes sur une musique et remplit chaque plan avec tes images.",
+  "improved": [
+    "Accueil : « refais le montage d'une vidéo qui te plaît », sous la zone de description",
+    "Détection des coupes en quelques secondes, avec une planche de tous les plans et leur couleur dominante",
+    "Format, durée et nombre de plans repris de la référence ; tempo mesuré quand elle a du son",
+    "Les coupes se calent sur les temps de ta musique, sans laisser de plan trop court",
+    "Chaque plan se remplit avec une prise du simulateur ou une vidéo, recadrée à sa durée"
+  ],
+  "fixed": []
+}

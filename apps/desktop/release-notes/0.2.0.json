@@ -7,12 +7,17 @@
     "La conversation avec l'agent et le message en cours d'écriture survivent à un redémarrage",
     "La colonne Projets se replie depuis son propre onglet, et revient avec ⌘B",
     "« Vérifier le mouvement » repère les animations qui démarrent en retard, calent ou saccadent",
-    "Touche D : trace un passage sur la timeline pour en parler à l'agent"
+    "Touche D : trace un passage sur la timeline pour en parler à l'agent",
+    "Bibliothèque d'effets : 123 transitions et des effets GSAP, que l'agent cherche et installe lui-même",
+    "Séries : plusieurs versions d'un même modèle, comparées sur une seule planche et exportées d'un coup",
+    "Filmer le simulateur iOS directement dans une scène, à la bonne durée, dans la langue choisie",
+    "Moteur HyperFrames à jour (v0.8.164)"
   ],
   "fixed": [
     "Un fromTo garde ses valeurs de départ quand une image tombe juste après son début",
     "La première image affichée correspond bien au temps demandé",
     "Les vidéos étalonnées n'ont plus de bruit de couleur à l'export, et le ProRes est marqué BT.709",
-    "Couper une vidéo dans un conteneur sans timing coupe la vidéo, pas le conteneur"
+    "Couper une vidéo dans un conteneur sans timing coupe la vidéo, pas le conteneur",
+    "Un effet publié depuis moins de 24 h s'installe sans attendre l'expiration du cache"
   ]
 }

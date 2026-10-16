@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, sep } from "node:path";
@@ -12,6 +12,9 @@ const MAX_SIDE = 2160;
 const ASPECT_TOLERANCE = 0.02;
 const TAKES_FOLDER = "assets/rec";
 const OFFSET_ATTRIBUTES = ["data-media-start", "data-playback-start"];
+const DEFAULT_SETTLE_SECONDS = 3;
+const LOCALE = /^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$/;
+const BUNDLE_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const even = (value) => Math.max(2, Math.round(value / 2) * 2);
@@ -152,6 +155,13 @@ function insideProject(projectDir, path) {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+function projectOutput(projectDir, output) {
+  const file = join(projectDir, normalize(String(output)));
+  if (isAbsolute(String(output)) || !insideProject(projectDir, file)) throw new Error(`output must be a path inside the project, not ${output}.`);
+  if (extname(file).toLowerCase() !== ".mp4") throw new Error("output must end in .mp4.");
+  return file;
+}
+
 function outputName(name, fallback) {
   const base = basename(String(name ?? fallback), extname(String(name ?? fallback))).replace(/[^\p{L}\p{N} _.-]/gu, "-");
   if (!base.trim()) throw new Error("name must contain letters or digits.");
@@ -172,9 +182,21 @@ async function encode({ source, output, width, height, fps, seconds, from }) {
 
 /**
  * Encodes `source` to fit the scene's `<video id>`: its duration, the previous take's size, a constant
- * frame rate. Saved next to the previous take (else assets/rec/) and wired into the composition.
+ * frame rate. Saved at `output`, else next to the previous take (else assets/rec/), and wired into the
+ * composition unless `rewire` is false (a variant fed through the video's variable at render time).
  */
-export async function fitVideoIntoScene({ projectDir, source, video, composition = "index.html", name, from = 0, fps = DEFAULT_FPS, fallbackName }) {
+export async function fitVideoIntoScene({
+  projectDir,
+  source,
+  video,
+  composition = "index.html",
+  name,
+  output: outputPath,
+  rewire = true,
+  from = 0,
+  fps = DEFAULT_FPS,
+  fallbackName,
+}) {
   const compositionFile = join(projectDir, normalize(String(composition)));
   if (!insideProject(projectDir, compositionFile) || !existsSync(compositionFile)) {
     throw new Error(`No composition ${composition} in the project.`);
@@ -191,13 +213,13 @@ export async function fitVideoIntoScene({ projectDir, source, video, composition
   const take = videoStream(await probeMedia(sourceFile));
   const size = targetSize(take, previous);
   const folder = previous ? dirname(previousFile) : join(projectDir, TAKES_FOLDER);
-  const output = join(folder, outputName(name, fallbackName ?? basename(sourceFile)));
+  const output = outputPath ? projectOutput(projectDir, outputPath) : join(folder, outputName(name, fallbackName ?? basename(sourceFile)));
   const seconds = target.duration;
   await encode({ source: sourceFile, output, ...size, fps, seconds, from });
 
   const src = relative(dirname(compositionFile), output).split(sep).join("/");
-  const rewired = retargetVideo(html, String(video), src);
-  writeFileSync(compositionFile, rewired.html);
+  const rewired = rewire ? retargetVideo(html, String(video), src) : null;
+  if (rewired) writeFileSync(compositionFile, rewired.html);
   const usable = take.duration === null ? null : Math.max(0, take.duration - from);
   return {
     output,
@@ -210,16 +232,20 @@ export async function fitVideoIntoScene({ projectDir, source, video, composition
     sourceSeconds: take.duration,
     ...(usable !== null && usable < seconds && { heldLastFrameSeconds: Math.round((seconds - usable) * 1000) / 1000 }),
     ...(usable !== null && usable > seconds && { cutSeconds: Math.round((usable - seconds) * 1000) / 1000 }),
-    ...(rewired.variable && { variable: rewired.variable, variableUpdated: rewired.variableUpdated }),
-    ...(rewired.clearedOffset.length && { clearedOffset: rewired.clearedOffset }),
+    ...(rewired
+      ? {
+          ...(rewired.variable && { variable: rewired.variable, variableUpdated: rewired.variableUpdated }),
+          ...(rewired.clearedOffset.length && { clearedOffset: rewired.clearedOffset }),
+        }
+      : { rewired: false, ...(target.variable && { variable: target.variable, renderVariables: { [target.variable]: src } }) }),
   };
 }
 
 /** Encodes a raw take at its wall-clock length (simctl writes nothing while the screen is still). */
-export async function saveTake({ projectDir, source, seconds, name, from = 0, fps = DEFAULT_FPS }) {
+export async function saveTake({ projectDir, source, seconds, name, output: outputPath, from = 0, fps = DEFAULT_FPS }) {
   const take = videoStream(await probeMedia(source));
   const size = targetSize(take, null);
-  const output = join(projectDir, TAKES_FOLDER, outputName(name, `take-${stamp()}`));
+  const output = outputPath ? projectOutput(projectDir, outputPath) : join(projectDir, TAKES_FOLDER, outputName(name, `take-${stamp()}`));
   const length = Math.max(0.1, seconds - from);
   await encode({ source, output, ...size, fps, seconds: length, from });
   return { output, src: relative(projectDir, output).split(sep).join("/"), width: size.width, height: size.height, fps, seconds: length };
@@ -235,11 +261,111 @@ function bootedSimulators() {
   });
 }
 
-let current = null;
+function simctl(args) {
+  return new Promise((resolve) => {
+    execFile("xcrun", ["simctl", ...args], { timeout: 30_000 }, (error, stdout, stderr) =>
+      resolve({ ok: !error, stdout: String(stdout ?? ""), stderr: String(stderr || error?.message || "").trim() }),
+    );
+  });
+}
 
-/** Starts recording a booted simulator's screen. Resolves once simctl reports the recording started. */
-export async function startSimulatorTake({ udid } = {}) {
-  if (current) throw new Error(`A take of ${current.device.name} is already recording. Stop or cancel it first.`);
+function simctlSync(args) {
+  try {
+    const stdout = execFileSync("xcrun", ["simctl", ...args], { timeout: 30_000, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+    return { ok: true, stdout, stderr: "" };
+  } catch (error) {
+    return { ok: false, stdout: "", stderr: String(error.stderr || error.message).trim() };
+  }
+}
+
+/** The entries of a string array printed by `defaults read`, e.g. `( "fr-FR", "en-US" )`. */
+export function parseDefaultsArray(output) {
+  return output
+    .trim()
+    .replace(/^\(|\)$/g, "")
+    .split(",")
+    .map((item) => item.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+}
+
+/** The AppleLanguages / AppleLocale pair for `en`, `en-US` or `fr_FR`. */
+export function localeDefaults(locale) {
+  if (!LOCALE.test(locale)) throw new Error(`locale looks like en, en-US or fr_FR, not ${locale}.`);
+  return { languages: [locale.replace(/_/g, "-")], appleLocale: locale.replace(/-/g, "_") };
+}
+
+/** simctl commands that set the simulator's language; a null value deletes the key. */
+export function languageCommands(udid, { languages, appleLocale }) {
+  const write = (key, ...value) => ["spawn", udid, "defaults", "write", "-g", key, ...value];
+  const remove = (key) => ["spawn", udid, "defaults", "delete", "-g", key];
+  return [
+    languages?.length ? write("AppleLanguages", "-array", ...languages) : remove("AppleLanguages"),
+    appleLocale ? write("AppleLocale", appleLocale) : remove("AppleLocale"),
+  ];
+}
+
+const relaunchCommands = (udid, app) => [
+  { args: ["terminate", udid, app], optional: true },
+  { args: ["launch", udid, app], optional: false },
+];
+
+async function runAll(commands) {
+  for (const { args, optional } of commands) {
+    const run = await simctl(args);
+    if (!run.ok && !optional) throw new Error(`simctl ${args[0]} failed: ${run.stderr}`);
+  }
+}
+
+function runAllSync(commands) {
+  const errors = [];
+  for (const { args, optional } of commands) {
+    const run = simctlSync(args);
+    if (!run.ok && !optional) errors.push(`simctl ${args[0]}: ${run.stderr}`);
+  }
+  return errors;
+}
+
+/** What puts the simulator back as it was before the take: its language, then the app relaunched in it. */
+function restoreCommands({ device, original, app }) {
+  if (!original) return [];
+  return [
+    ...languageCommands(device.udid, original).map((args) => ({ args, optional: false })),
+    ...(app ? relaunchCommands(device.udid, app) : []),
+  ];
+}
+
+async function restoreDevice(take) {
+  const commands = restoreCommands(take);
+  if (commands.length === 0) return null;
+  try {
+    await runAll(commands);
+    return { languages: take.original.languages, locale: take.original.appleLocale, relaunched: Boolean(take.app) };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+let current = null;
+let starting = false;
+
+/**
+ * Starts recording a booted simulator's screen. With `locale`, the simulator's language is switched for the
+ * take; with `app`, that app is relaunched (in the new language) and given `settle` seconds before recording.
+ * Resolves once simctl reports the recording started.
+ */
+export async function startSimulatorTake({ udid, locale, app, settle = DEFAULT_SETTLE_SECONDS } = {}) {
+  if (current || starting) throw new Error(`A take${current ? ` of ${current.device.name}` : ""} is already recording. Stop or cancel it first.`);
+  if (app !== undefined && !BUNDLE_ID.test(String(app))) throw new Error(`app is a bundle id like com.example.app, not ${app}.`);
+  const wanted = locale ? localeDefaults(String(locale)) : null;
+  starting = true;
+  try {
+    return await beginTake({ udid, wanted, app: app === undefined ? null : String(app), settle });
+  } finally {
+    starting = false;
+  }
+}
+
+async function beginTake({ udid, wanted, app, settle }) {
   const booted = await bootedSimulators();
   if (booted.length === 0) throw new Error("No simulator is booted. Boot one first (sim-mirror, or xcrun simctl boot <udid>).");
   const device = udid ? booted.find((candidate) => candidate.udid === udid) : booted.length === 1 ? booted[0] : null;
@@ -247,13 +373,50 @@ export async function startSimulatorTake({ udid } = {}) {
     const list = booted.map((candidate) => `${candidate.name} ${candidate.udid}`).join("; ");
     throw new Error(udid ? `${udid} is not a booted simulator. Booted: ${list}.` : `Several simulators are booted; pass udid. Booted: ${list}.`);
   }
+
+  let original = null;
+  if (wanted) {
+    const [languages, appleLocale] = await Promise.all([
+      simctl(["spawn", device.udid, "defaults", "read", "-g", "AppleLanguages"]),
+      simctl(["spawn", device.udid, "defaults", "read", "-g", "AppleLocale"]),
+    ]);
+    original = {
+      languages: languages.ok ? parseDefaultsArray(languages.stdout) : null,
+      appleLocale: appleLocale.ok ? appleLocale.stdout.trim() : null,
+    };
+  }
+  const setup = { device, original, app };
+  try {
+    if (wanted) {
+      const languages = [...new Set([...wanted.languages, ...(original.languages ?? [])])];
+      await runAll(languageCommands(device.udid, { languages, appleLocale: wanted.appleLocale }).map((args) => ({ args, optional: false })));
+    }
+    if (app) {
+      await runAll(relaunchCommands(device.udid, app));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(30, Math.max(0, Number(settle) || 0)) * 1000));
+    }
+    await record(setup);
+    return {
+      device,
+      maxSeconds: MAX_TAKE_SECONDS,
+      ...(wanted && { locale: wanted.appleLocale, restoresOnStop: original }),
+      ...(app && { relaunched: app }),
+      ...(wanted && !app && { note: "Running apps keep their language until relaunched; pass app to relaunch one." }),
+    };
+  } catch (error) {
+    await restoreDevice(setup);
+    throw error;
+  }
+}
+
+async function record({ device, original, app }) {
   const work = mkdtempSync(join(tmpdir(), "glintmotion-take-"));
   const file = join(work, "take.mp4");
   const child = spawn("xcrun", ["simctl", "io", device.udid, "recordVideo", "--codec", "h264", "--force", file], {
     stdio: ["ignore", "ignore", "pipe"],
   });
   const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
-  const take = { device, child, file, work, exited, startedAt: 0, stoppedAt: 0, autoStopped: false, timer: null };
+  const take = { device, original, app, child, file, work, exited, startedAt: 0, stoppedAt: 0, autoStopped: false, timer: null };
   current = take;
   try {
     await new Promise((resolve, reject) => {
@@ -287,10 +450,12 @@ export async function startSimulatorTake({ udid } = {}) {
     take.stoppedAt = Date.now();
     child.kill("SIGINT");
   }, MAX_TAKE_SECONDS * 1000);
-  return { device, maxSeconds: MAX_TAKE_SECONDS };
 }
 
-/** Stops the take and returns the raw file with its wall-clock length. The caller removes `work`. */
+/**
+ * Stops the take, puts the simulator's language (and the relaunched app) back, and returns the raw file
+ * with its wall-clock length. The caller removes `work`.
+ */
 export async function stopSimulatorTake() {
   const take = current;
   if (!take) throw new Error("No take is recording. Start one with action 'start'.");
@@ -301,6 +466,7 @@ export async function stopSimulatorTake() {
     take.child.kill("SIGINT");
   }
   const code = await take.exited;
+  const restored = await restoreDevice(take);
   if (!existsSync(take.file)) {
     rmSync(take.work, { recursive: true, force: true });
     throw new Error(`simctl wrote no video (code ${code}).`);
@@ -311,10 +477,11 @@ export async function stopSimulatorTake() {
     device: take.device,
     seconds: Math.round(take.stoppedAt - take.startedAt) / 1000,
     autoStopped: take.autoStopped,
+    ...(restored && { restored }),
   };
 }
 
-/** Drops the take being recorded, if any. Safe to call at quit. */
+/** Drops the take being recorded, if any, and puts the simulator back. Synchronous, so it holds at quit. */
 export function cancelSimulatorTake() {
   const take = current;
   if (!take) return false;
@@ -322,6 +489,7 @@ export function cancelSimulatorTake() {
   clearTimeout(take.timer);
   take.child.kill("SIGKILL");
   rmSync(take.work, { recursive: true, force: true });
+  runAllSync(restoreCommands(take));
   return true;
 }
 

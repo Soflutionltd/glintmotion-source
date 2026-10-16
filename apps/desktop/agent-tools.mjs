@@ -59,6 +59,16 @@ const TAKE_FIT_PROPERTIES = {
   video: { type: "string", description: "id of the <video> element in the scene that plays the take." },
   composition: { type: "string", description: "Project-relative composition file. Default index.html." },
   name: { type: "string", description: "File name for the take, e.g. 'switch'. Saved as <name>.mp4." },
+  output: {
+    type: "string",
+    description: "Project-relative .mp4 path, e.g. assets/rec/en/switch.mp4. Overrides name and the default folder.",
+  },
+  rewire: {
+    type: "boolean",
+    default: true,
+    description:
+      "false saves the file without touching the composition, for a variant (another language) fed through the video's variable at render time.",
+  },
   from: { type: "number", minimum: 0, default: 0, description: "Skip this many seconds at the start of the file." },
   fps: { type: "number", minimum: 1, maximum: 120, default: DEFAULT_FPS },
 };
@@ -270,8 +280,9 @@ export const AGENT_TOOLS = [
     description: [
       "Put a video file into a scene's <video id>: encoded to that element's data-duration (the last frame is",
       "held when the file is shorter, the end is cut when it is longer), at the previous take's size when the",
-      "framing matches, constant frame rate, no audio. Saved next to the previous take (else assets/rec/); the",
-      "element's src and the default of its data-var-src variable then point at it. Call inside a glintmotion_session.",
+      "framing matches, constant frame rate, no audio. Saved at `output`, else next to the previous take (else",
+      "assets/rec/); the element's src and the default of its data-var-src variable then point at it, unless rewire",
+      "is false (the result then gives the renderVariables that select the file). Call inside a glintmotion_session.",
     ].join(" "),
     inputSchema: {
       type: "object",
@@ -290,12 +301,26 @@ export const AGENT_TOOLS = [
       "With `video`, stop fits the take into that <video id> like glintmotion_fit_video. Without it, the take is",
       "saved under assets/rec/ at its real length: simctl writes no frame while the screen is still, so the last",
       `frame is held up to the moment of stop. cancel drops the take. A take stops itself after ${MAX_TAKE_SECONDS} s.`,
+      "start with `locale` films in another language: the simulator's language is switched, `app` is relaunched in",
+      "it, and stop or cancel put the language back and relaunch the app again.",
     ].join(" "),
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: TAKE_ACTIONS },
         udid: { type: "string", description: "For start: the simulator to film. Default: the only booted one." },
+        locale: { type: "string", description: "For start: the language to film in, e.g. en-US or fr_FR." },
+        app: {
+          type: "string",
+          description: "For start: bundle id relaunched before recording (in `locale` when given), e.g. com.example.app.",
+        },
+        settle: {
+          type: "number",
+          minimum: 0,
+          maximum: 30,
+          default: 3,
+          description: "For start with app: seconds the relaunched app gets before recording starts.",
+        },
         ...TAKE_FIT_PROPERTIES,
       },
       required: ["action"],
@@ -492,7 +517,7 @@ export const MCP_INSTRUCTIONS = [
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
-  "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded.",
+  "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded. Another language: start with locale and app, stop with output and rewire false.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
 ].join("\n");
 
@@ -765,12 +790,14 @@ export function createAgentTools(app) {
     return run.code === 0 ? text(json) : { ...text(json), isError: true };
   }
 
-  function fitOptions({ video, composition, name, from, fps }) {
+  function fitOptions({ video, composition, name, output, rewire, from, fps }) {
     return {
       projectDir: app.projectDir(),
       video,
       composition: composition ?? "index.html",
       name,
+      output: output ? String(output) : undefined,
+      rewire: rewire !== false,
       from: clampNumber(from, 0, 3600, 0),
       fps: clampNumber(fps, 1, 120, DEFAULT_FPS),
     };
@@ -786,7 +813,7 @@ export function createAgentTools(app) {
       case "start":
         return text({
           recording: true,
-          ...(await startSimulatorTake({ udid: input.udid })),
+          ...(await startSimulatorTake({ udid: input.udid, locale: input.locale, app: input.app, settle: input.settle })),
           next: "Drive the simulator now, then call glintmotion_simulator_take with action 'stop'.",
         });
       case "stop": {
@@ -801,6 +828,7 @@ export function createAgentTools(app) {
             device: take.device,
             recordedSeconds: take.seconds,
             ...(take.autoStopped && { autoStopped: `stopped at ${MAX_TAKE_SECONDS} s` }),
+            ...(take.restored && { restored: take.restored }),
           });
         } finally {
           rmSync(take.work, { recursive: true, force: true });

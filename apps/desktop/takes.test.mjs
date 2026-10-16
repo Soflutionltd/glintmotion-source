@@ -4,7 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { probeMedia, runFfmpeg } from "./media.mjs";
-import { findVideo, fitArgs, fitVideoIntoScene, retargetVideo, setVariableDefault, targetSize } from "./takes.mjs";
+import {
+  findVideo,
+  fitArgs,
+  fitVideoIntoScene,
+  languageCommands,
+  localeDefaults,
+  parseDefaultsArray,
+  retargetVideo,
+  setVariableDefault,
+  targetSize,
+} from "./takes.mjs";
 
 const SCENE = `<!DOCTYPE html>
 <html data-composition-variables="[
@@ -83,17 +93,66 @@ describe("fitArgs", () => {
   });
 });
 
+describe("simulator language", () => {
+  it("parses the array defaults prints", () => {
+    assert.deepEqual(parseDefaultsArray('(\n    "fr-FR",\n    "en-US"\n)\n'), ["fr-FR", "en-US"]);
+    assert.deepEqual(parseDefaultsArray("(\n    en\n)"), ["en"]);
+  });
+
+  it("derives the language and the region format from one locale", () => {
+    assert.deepEqual(localeDefaults("en-US"), { languages: ["en-US"], appleLocale: "en_US" });
+    assert.deepEqual(localeDefaults("fr_FR"), { languages: ["fr-FR"], appleLocale: "fr_FR" });
+    assert.throws(() => localeDefaults("en US; rm"), /locale looks like/);
+  });
+
+  it("deletes a key the simulator did not have", () => {
+    const [languages, locale] = languageCommands("U", { languages: ["fr-FR", "en-US"], appleLocale: null });
+    assert.deepEqual(languages, ["spawn", "U", "defaults", "write", "-g", "AppleLanguages", "-array", "fr-FR", "en-US"]);
+    assert.deepEqual(locale, ["spawn", "U", "defaults", "delete", "-g", "AppleLocale"]);
+  });
+});
+
 describe("fitVideoIntoScene", () => {
   let dir;
+  const make = (file, size, seconds) =>
+    runFfmpeg(["-y", "-f", "lavfi", "-i", `testsrc=size=${size}:rate=60`, "-t", String(seconds), "-pix_fmt", "yuv420p", file]);
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "takes-test-"));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("saves a variant at output without touching the composition", async () => {
+    mkdirSync(join(dir, "assets/rec/fr"), { recursive: true });
+    assert.equal((await make(join(dir, "assets/rec/fr/grid.mp4"), "100x200", 1)).code, 0);
+    assert.equal((await make(join(dir, "raw.mov"), "220x440", 2)).code, 0);
+    writeFileSync(join(dir, "index.html"), SCENE);
+
+    const result = await fitVideoIntoScene({
+      projectDir: dir,
+      source: "raw.mov",
+      video: "v-grid",
+      output: "assets/rec/en/grid.mp4",
+      rewire: false,
+    });
+
+    assert.equal(result.rewired, false);
+    assert.deepEqual(result.renderVariables, { recGrid: "assets/rec/en/grid.mp4" });
+    assert.equal(result.cutSeconds, 0.5);
+    assert.equal(readFileSync(join(dir, "index.html"), "utf-8"), SCENE);
+    const stream = (await probeMedia(join(dir, "assets/rec/en/grid.mp4"))).streams.find((candidate) => candidate.codec_type === "video");
+    assert.deepEqual([stream.width, stream.height], [100, 200]);
+  });
+
+  it("refuses an output outside the project or not in .mp4", async () => {
+    assert.equal((await make(join(dir, "raw.mov"), "100x200", 0.2)).code, 0);
+    writeFileSync(join(dir, "index.html"), SCENE);
+    const fit = (output) => fitVideoIntoScene({ projectDir: dir, source: "raw.mov", video: "v-grid", output });
+    await assert.rejects(fit("../outside.mp4"), /inside the project/);
+    await assert.rejects(fit("assets/rec/en/grid.mov"), /\.mp4/);
+  });
+
   it("encodes a short take to the scene length and wires it in", async () => {
     mkdirSync(join(dir, "assets/rec/fr"), { recursive: true });
-    const make = (file, size, seconds) =>
-      runFfmpeg(["-y", "-f", "lavfi", "-i", `testsrc=size=${size}:rate=60`, "-t", String(seconds), "-pix_fmt", "yuv420p", file]);
     assert.equal((await make(join(dir, "assets/rec/fr/grid.mp4"), "100x200", 1)).code, 0);
     assert.equal((await make(join(dir, "raw.mov"), "220x440", 0.6)).code, 0);
     writeFileSync(join(dir, "index.html"), SCENE);

@@ -185,6 +185,8 @@ export interface RunAddArgs {
   /** Current CLI version used for registry metadata compatibility checks. */
   cliVersion?: string;
   source?: "cli" | "studio";
+  /** Registry base URL for this install only; the project's hyperframes.json keeps its own. */
+  registry?: string;
 }
 
 export interface RunAddResult {
@@ -339,9 +341,10 @@ export async function addToProject(
   // 2. Resolve the requested item and its transitive registryDependencies.
   //    The list comes back topologically sorted: dependencies first, the
   //    requested item last.
+  const registry = opts.registry ?? config.registry;
   let resolved: RegistryItem[];
   try {
-    resolved = await resolveItemWithDependencies(opts.name, { baseUrl: config.registry });
+    resolved = await resolveItemWithDependencies(opts.name, { baseUrl: registry });
   } catch (err) {
     throw new AddError(err instanceof Error ? err.message : String(err), "unknown-item");
   }
@@ -374,7 +377,7 @@ export async function addToProject(
   const { written, preserved, variablesApplied, variablesUnknown } = await installAll(
     installPlan,
     projectDir,
-    config.registry,
+    registry,
     opts.force ?? false,
     item.name,
     variableValues,
@@ -480,6 +483,11 @@ export default defineCommand({
       description:
         "Overwrite files you have edited since installing them (they are kept by default)",
     },
+    registry: {
+      type: "string",
+      description:
+        "Registry base URL for this install only (e.g. another catalog); hyperframes.json is not changed",
+    },
   },
   // `run` is 28 cyclomatic and predates this change, which touches only
   // `runAdd`. Fallow scores it as new because the file changed. Splitting the
@@ -501,6 +509,7 @@ export default defineCommand({
         skipClipboard,
         force: args.force,
         vars: args.vars,
+        registry: args.registry,
       });
       const wroteConfig = !hasConfigBefore && existsSync(projectConfigPath(projectDir));
 
@@ -564,7 +573,10 @@ export default defineCommand({
 
       let items: Awaited<ReturnType<typeof resolveItemsByTag>>;
       try {
-        items = await resolveItemsByTag(args.name, { baseUrl: config.registry, skipCache: true });
+        items = await resolveItemsByTag(args.name, {
+          baseUrl: args.registry ?? config.registry,
+          skipCache: true,
+        });
       } catch {
         items = [];
       }
@@ -592,6 +604,7 @@ export default defineCommand({
             skipClipboard: true,
             force: args.force,
             vars: args.vars,
+            registry: args.registry,
           });
           results.push(result);
           for (const warning of result.warnings) {

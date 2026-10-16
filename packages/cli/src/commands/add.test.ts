@@ -330,6 +330,33 @@ describe("runAdd (integration, mocked registry)", () => {
     }
   });
 
+  it("installs from --registry without changing the project's registry", async () => {
+    const dir = tmp();
+    try {
+      writeRegistryConfig(dir);
+      const projectRegistry = JSON.parse(
+        readFileSync(join(dir, "hyperframes.json"), "utf-8"),
+      ).registry;
+      const other = uniqueBase();
+
+      const result = await runAdd({
+        name: "my-block",
+        projectDir: dir,
+        skipClipboard: true,
+        registry: other,
+      });
+      expect(result.ok).toBe(true);
+      const urls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+      expect(urls.some((url) => url.startsWith(other))).toBe(true);
+      expect(urls.some((url) => url.startsWith(projectRegistry))).toBe(false);
+      expect(JSON.parse(readFileSync(join(dir, "hyperframes.json"), "utf-8")).registry).toBe(
+        projectRegistry,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns a warning for deprecated registry items while still installing", async () => {
     const dir = tmp();
     try {

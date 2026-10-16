@@ -11,6 +11,7 @@ import {
   detectCuts,
   parseSceneScores,
   readShots,
+  referencePrompt,
   resolutionFor,
   retimeShots,
   scaleShots,
@@ -21,7 +22,10 @@ import {
 
 /** 30 fps of near-still frames with hard cuts at the given frame indexes. */
 function frames(count, cuts, { still = 0.003, cut = 0.4 } = {}) {
-  return Array.from({ length: count }, (_, i) => ({ time: i / 30, score: cuts.includes(i) ? cut : still }));
+  return Array.from({ length: count }, (_, i) => ({
+    time: i / 30,
+    score: cuts.includes(i) ? cut : still,
+  }));
 }
 
 describe("parseSceneScores", () => {
@@ -49,7 +53,9 @@ describe("detectCuts", () => {
   });
 
   it("keeps one cut for a flash shorter than the shortest shot", () => {
-    const cuts = detectCuts(frames(90, [30, 32]).map((frame, i) => (i === 32 ? { ...frame, score: 0.6 } : frame)));
+    const cuts = detectCuts(
+      frames(90, [30, 32]).map((frame, i) => (i === 32 ? { ...frame, score: 0.6 } : frame)),
+    );
     assert.deepEqual(cuts, [32]);
   });
 
@@ -125,7 +131,12 @@ describe("composition", () => {
     { id: "shot-01", start: 0, duration: 1.5 },
     { id: "shot-02", start: 1.5, duration: 2 },
   ];
-  const html = compositionHtml({ resolution: "post", shots, duration: 3.5, title: "Remake <test>" });
+  const html = compositionHtml({
+    resolution: "post",
+    shots,
+    duration: 3.5,
+    title: "Remake <test>",
+  });
 
   it("lays one video per shot on one track, at the format's size", () => {
     assert.match(html, /data-width="1080"\s+data-height="1350"/);
@@ -135,15 +146,40 @@ describe("composition", () => {
   });
 
   it("retimes the shots without touching other attributes", () => {
-    const next = retimeShots(html.replace('id="shot-02" class="shot"', 'id="shot-02" class="shot" data-media-start="0.4"'), [
-      { id: "shot-01", start: 0, duration: 1.4 },
-      { id: "shot-02", start: 1.4, duration: 2.1 },
-    ]);
-    assert.match(next, /id="shot-02" class="shot" data-media-start="0.4" src="assets\/shots\/shot-02.mp4"/);
+    const next = retimeShots(
+      html.replace('id="shot-02" class="shot"', 'id="shot-02" class="shot" data-media-start="0.4"'),
+      [
+        { id: "shot-01", start: 0, duration: 1.4 },
+        { id: "shot-02", start: 1.4, duration: 2.1 },
+      ],
+    );
+    assert.match(
+      next,
+      /id="shot-02" class="shot" data-media-start="0.4" src="assets\/shots\/shot-02.mp4"/,
+    );
     assert.deepEqual(readShots(next), [
       { id: "shot-01", start: 0, duration: 1.4 },
       { id: "shot-02", start: 1.4, duration: 2.1 },
     ]);
+  });
+
+  it("tells the agent the shots to fill and the tempo to match", () => {
+    const prompt = referencePrompt({
+      source: "ad.mp4",
+      analysis: { bpm: 120 },
+      built: { shots, durationSeconds: 3.5 },
+    });
+    assert.match(prompt, /« ad\.mp4 » : 2 plans sur 3\.5 s, musique à 120 bpm/);
+    assert.match(prompt, /shot-01 à shot-02/);
+    assert.match(prompt, /glintmotion_generate_music pour 3\.5 s à environ 120 bpm/);
+    assert.doesNotMatch(
+      referencePrompt({
+        source: "a.mp4",
+        analysis: { bpm: null },
+        built: { shots, durationSeconds: 3.5 },
+      }),
+      /bpm/,
+    );
   });
 
   it("picks the format closest to the reference", () => {
@@ -164,11 +200,26 @@ describe("analyzeReference and writeReferenceProject", () => {
     const segment = (color) => `color=c=${color}:s=320x568:r=30:d=1`;
     const { code, stderr } = await runFfmpeg([
       "-y",
-      "-f", "lavfi", "-i", segment("red"),
-      "-f", "lavfi", "-i", segment("blue"),
-      "-f", "lavfi", "-i", segment("green"),
-      "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0",
-      "-c:v", "h264_videotoolbox", "-q:v", "60", "-pix_fmt", "yuv420p",
+      "-f",
+      "lavfi",
+      "-i",
+      segment("red"),
+      "-f",
+      "lavfi",
+      "-i",
+      segment("blue"),
+      "-f",
+      "lavfi",
+      "-i",
+      segment("green"),
+      "-filter_complex",
+      "[0:v][1:v][2:v]concat=n=3:v=1:a=0",
+      "-c:v",
+      "h264_videotoolbox",
+      "-q:v",
+      "60",
+      "-pix_fmt",
+      "yuv420p",
       reference,
     ]);
     assert.equal(code, 0, stderr.slice(-400));
@@ -185,7 +236,10 @@ describe("analyzeReference and writeReferenceProject", () => {
     });
     assert.equal(analysis.resolution, "portrait");
     assert.equal(analysis.shotCount, 3);
-    assert.deepEqual(analysis.shots.map((shot) => Math.round(shot.start)), [0, 1, 2]);
+    assert.deepEqual(
+      analysis.shots.map((shot) => Math.round(shot.start)),
+      [0, 1, 2],
+    );
     const [red, blue, green] = analysis.shots.map((shot) => shot.color);
     assert.ok(parseInt(red.slice(1, 3), 16) > 200, red);
     assert.ok(parseInt(blue.slice(5, 7), 16) > 200, blue);
@@ -194,7 +248,13 @@ describe("analyzeReference and writeReferenceProject", () => {
     assert.ok(existsSync(sheet));
 
     const dir = join(work, "project");
-    const built = await writeReferenceProject({ dir, analysis, resolution: "portrait", duration: 6, title: "Test" });
+    const built = await writeReferenceProject({
+      dir,
+      analysis,
+      resolution: "portrait",
+      duration: 6,
+      title: "Test",
+    });
     assert.equal(built.durationSeconds, 6);
     const html = readFileSync(join(dir, "index.html"), "utf-8");
     assert.equal(readShots(html).length, 3);

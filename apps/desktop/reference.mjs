@@ -67,16 +67,23 @@ export function parseSceneScores(stderr) {
 export function detectCuts(frames, { sensitivity = "normal", minShot = MIN_SHOT_SECONDS } = {}) {
   const rule = SENSITIVITY[sensitivity];
   if (!rule) throw new Error(`sensitivity is one of ${Object.keys(SENSITIVITY).join(", ")}.`);
-  const fps = frames.length > 1 ? (frames.length - 1) / Math.max(1e-6, frames.at(-1).time - frames[0].time) : 30;
+  const fps =
+    frames.length > 1
+      ? (frames.length - 1) / Math.max(1e-6, frames.at(-1).time - frames[0].time)
+      : 30;
   const near = Math.max(1, Math.round(fps / 10));
   const around = Math.max(near + 1, Math.round(fps / 2));
   const cuts = [];
   for (let i = 1; i < frames.length; i++) {
     const { score, time } = frames[i];
     if (score < rule.floor) continue;
-    const neighbours = frames.slice(Math.max(0, i - near), i + near + 1).map((frame) => frame.score);
+    const neighbours = frames
+      .slice(Math.max(0, i - near), i + near + 1)
+      .map((frame) => frame.score);
     if (score < Math.max(...neighbours)) continue;
-    const usual = median(frames.slice(Math.max(0, i - around), i + around + 1).map((frame) => frame.score));
+    const usual = median(
+      frames.slice(Math.max(0, i - around), i + around + 1).map((frame) => frame.score),
+    );
     if (score < usual * rule.ratio + 0.02) continue;
     const previous = cuts.length ? frames[cuts.at(-1)].time : frames[0].time;
     if (time - previous < minShot) {
@@ -103,7 +110,10 @@ export function shotsFromCuts(frames, cuts, duration) {
     const end = n + 1 < starts.length ? frames[endIndex].time : duration;
     const inner = frames.slice(startIndex + 1, endIndex).map((frame) => frame.score);
     const motion = inner.length ? inner.reduce((sum, value) => sum + value, 0) / inner.length : 0;
-    const middle = Math.min(frames.length - 1, Math.round((startIndex + Math.max(startIndex, endIndex - 1)) / 2));
+    const middle = Math.min(
+      frames.length - 1,
+      Math.round((startIndex + Math.max(startIndex, endIndex - 1)) / 2),
+    );
     return {
       id: `shot-${String(n + 1).padStart(2, "0")}`,
       start: round(start),
@@ -119,7 +129,9 @@ export function shotsFromCuts(frames, cuts, duration) {
 export function cutsOnBeat(shots, beats) {
   const cuts = shots.slice(1).map((shot) => shot.start);
   if (cuts.length === 0 || beats.length === 0) return null;
-  const hits = cuts.filter((cut) => beats.some((beat) => Math.abs(beat - cut) <= ON_BEAT_SECONDS)).length;
+  const hits = cuts.filter((cut) =>
+    beats.some((beat) => Math.abs(beat - cut) <= ON_BEAT_SECONDS),
+  ).length;
   return round(hits / cuts.length, 2);
 }
 
@@ -159,7 +171,10 @@ function selectFrames(indexes) {
 
 function sampleForSheet(shots) {
   if (shots.length <= SHEET_TILES) return shots;
-  return Array.from({ length: SHEET_TILES }, (_, i) => shots[Math.round((i * (shots.length - 1)) / (SHEET_TILES - 1))]);
+  return Array.from(
+    { length: SHEET_TILES },
+    (_, i) => shots[Math.round((i * (shots.length - 1)) / (SHEET_TILES - 1))],
+  );
 }
 
 async function scoreFrames(file) {
@@ -174,7 +189,8 @@ async function scoreFrames(file) {
     "null",
     "-",
   ]);
-  if (code !== 0) throw new Error(`ffmpeg could not read the reference. ${stderr.slice(-400)}`.trim());
+  if (code !== 0)
+    throw new Error(`ffmpeg could not read the reference. ${stderr.slice(-400)}`.trim());
   return parseSceneScores(stderr);
 }
 
@@ -193,7 +209,8 @@ async function averageColors(file, indexes, work) {
     "rawvideo",
     output,
   ]);
-  if (code !== 0) throw new Error(`The shot colours could not be read. ${stderr.slice(-400)}`.trim());
+  if (code !== 0)
+    throw new Error(`The shot colours could not be read. ${stderr.slice(-400)}`.trim());
   const bytes = readFileSync(output);
   return indexes.map((_, i) => [bytes[i * 3] ?? 0, bytes[i * 3 + 1] ?? 0, bytes[i * 3 + 2] ?? 0]);
 }
@@ -217,7 +234,8 @@ async function shotSheet(file, shots, output) {
     "4",
     output,
   ]);
-  if (code !== 0) throw new Error(`The shot sheet could not be assembled. ${stderr.slice(-400)}`.trim());
+  if (code !== 0)
+    throw new Error(`The shot sheet could not be assembled. ${stderr.slice(-400)}`.trim());
   return tiles.map((shot) => shot.id);
 }
 
@@ -261,19 +279,30 @@ export async function analyzeReference({ file, sheet, sensitivity = "normal", ru
   if (frames.length < 2) throw new Error("The reference is too short to analyse.");
   const cuts = detectCuts(frames, { sensitivity });
   if (cuts.length + 1 > MAX_SHOTS) {
-    throw new Error(`The reference has ${cuts.length + 1} shots; up to ${MAX_SHOTS} are supported. Try sensitivity 'low'.`);
+    throw new Error(
+      `The reference has ${cuts.length + 1} shots; up to ${MAX_SHOTS} are supported. Try sensitivity 'low'.`,
+    );
   }
   const shots = shotsFromCuts(frames, cuts, duration);
 
   const work = mkdtempSync(join(tmpdir(), "glintmotion-reference-"));
   try {
-    const colors = await averageColors(file, shots.map((shot) => shot.frame), work);
+    const colors = await averageColors(
+      file,
+      shots.map((shot) => shot.frame),
+      work,
+    );
     shots.forEach((shot, i) => {
       shot.color = hex(colors[i]);
-      shot.brightness = round((0.2126 * colors[i][0] + 0.7152 * colors[i][1] + 0.0722 * colors[i][2]) / 255, 2);
+      shot.brightness = round(
+        (0.2126 * colors[i][0] + 0.7152 * colors[i][1] + 0.0722 * colors[i][2]) / 255,
+        2,
+      );
     });
     const sheetShots = sheet ? await shotSheet(file, shots, sheet) : null;
-    const { beats, bpm } = hasAudio ? await referenceBeats(file, duration, runBeats, work) : { beats: [], bpm: null };
+    const { beats, bpm } = hasAudio
+      ? await referenceBeats(file, duration, runBeats, work)
+      : { beats: [], bpm: null };
     const lengths = shots.map((shot) => shot.duration);
     return {
       width: video.width,
@@ -287,7 +316,7 @@ export async function analyzeReference({ file, sheet, sensitivity = "normal", ru
       bpm,
       cutsOnBeat: cutsOnBeat(shots, beats),
       beats: beats.map((beat) => round(beat)),
-      shots: shots.map(({ frame, ...shot }) => shot),
+      shots: shots.map(({ frame: _frame, ...shot }) => shot),
       ...(sheetShots && { sheetShots }),
     };
   } finally {
@@ -382,7 +411,8 @@ async function writePlaceholder(output, { width, height, color, seconds }) {
     "+faststart",
     output,
   ]);
-  if (code !== 0) throw new Error(`A placeholder shot could not be encoded. ${stderr.slice(-400)}`.trim());
+  if (code !== 0)
+    throw new Error(`A placeholder shot could not be encoded. ${stderr.slice(-400)}`.trim());
 }
 
 /**
@@ -402,7 +432,10 @@ export async function writeReferenceProject({ dir, analysis, resolution, duratio
       seconds: shot.duration,
     });
   }
-  writeFileSync(join(dir, "index.html"), compositionHtml({ resolution, shots, duration: total, title }));
+  writeFileSync(
+    join(dir, "index.html"),
+    compositionHtml({ resolution, shots, duration: total, title }),
+  );
   mkdirSync(join(dir, REFERENCE_DIR), { recursive: true });
   const scale = total / analysis.durationSeconds;
   const saved = {
@@ -413,6 +446,21 @@ export async function writeReferenceProject({ dir, analysis, resolution, duratio
   };
   writeFileSync(join(dir, REFERENCE_DIR, "analysis.json"), `${JSON.stringify(saved, null, 2)}\n`);
   return { shots, durationSeconds: total };
+}
+
+/** What the studio's agent receives for a project built from Home's « Refaire un montage ». */
+export function referencePrompt({ source, analysis, built }) {
+  const last = built.shots.at(-1).id;
+  const tempo = analysis.bpm ? ` à environ ${analysis.bpm} bpm` : "";
+  return [
+    `Ce projet reprend le montage de « ${source} » : ${built.shots.length} plans sur ${built.durationSeconds} s${analysis.bpm ? `, musique à ${analysis.bpm} bpm` : ""}.`,
+    `Les plans shot-01 à ${last} sont des aplats de couleur en attente. La planche des plans est dans reference/shots.jpg, l'analyse dans reference/analysis.json.`,
+    "1. Regarde reference/shots.jpg. Si je n'ai pas dit ce que la vidéo doit montrer, demande-le-moi avant d'aller plus loin.",
+    "2. glintmotion_session begin.",
+    `3. glintmotion_generate_music pour ${built.durationSeconds} s${tempo}, puis glintmotion_reference snap pour caler les coupes sur ses temps.`,
+    "4. Remplis chaque plan avec glintmotion_fit_video ou glintmotion_simulator_take, video et name = l'id du plan.",
+    "5. glintmotion_check, glintmotion_contact_sheet, puis glintmotion_session end.",
+  ].join("\n");
 }
 
 function hexToRgb(color) {
@@ -428,8 +476,12 @@ export function snapCuts(shots, beats, tolerance = DEFAULT_SNAP_SECONDS) {
   const moved = [];
   for (let n = 0; n < shots.length - 1; n++) {
     const cut = ends[n];
-    const beat = beats.reduce((best, time) => (Math.abs(time - cut) < Math.abs(best - cut) ? time : best), Infinity);
-    if (!Number.isFinite(beat) || Math.abs(beat - cut) > tolerance || Math.abs(beat - cut) < 1e-3) continue;
+    const beat = beats.reduce(
+      (best, time) => (Math.abs(time - cut) < Math.abs(best - cut) ? time : best),
+      Infinity,
+    );
+    if (!Number.isFinite(beat) || Math.abs(beat - cut) > tolerance || Math.abs(beat - cut) < 1e-3)
+      continue;
     const previousEnd = n === 0 ? shots[0].start : ends[n - 1];
     if (beat - previousEnd < MIN_SHOT_SECONDS || ends[n + 1] - beat < MIN_SHOT_SECONDS) continue;
     moved.push({ cut: n + 1, from: cut, to: round(beat) });
@@ -449,7 +501,8 @@ export function readShots(html) {
     const tag = match[0];
     const start = Number(/\sdata-start=(["'])([\d.]+)\1/.exec(tag)?.[2]);
     const duration = Number(/\sdata-duration=(["'])([\d.]+)\1/.exec(tag)?.[2]);
-    if (Number.isFinite(start) && Number.isFinite(duration)) shots.push({ id: match[2], start, duration });
+    if (Number.isFinite(start) && Number.isFinite(duration))
+      shots.push({ id: match[2], start, duration });
   }
   return shots.sort((a, b) => a.start - b.start);
 }

@@ -194,6 +194,18 @@ document.querySelectorAll(".quick-card[data-format]").forEach((card) => {
   card.addEventListener("click", () => startNewProject(card.dataset.format));
 });
 
+document.getElementById("remake-video").addEventListener("click", async () => {
+  const file = await api.start.pickReference();
+  if (!file) return;
+  setBusy("Analyse des coupes de la vidéo…");
+  try {
+    await api.start.reference(file);
+  } catch (error) {
+    showToast(cleanError(error));
+  } finally {
+    setBusy(null);
+  }
+});
 document.getElementById("open-folder").addEventListener("click", openFolder);
 document.getElementById("side-open").addEventListener("click", openFolder);
 document.getElementById("side-connect").addEventListener("click", () => api.mcp.open());

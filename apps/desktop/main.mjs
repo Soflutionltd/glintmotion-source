@@ -20,6 +20,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -30,13 +31,14 @@ import {
 } from "node:fs";
 import { copyFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { cancelSimulatorTake } from "./takes.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { probeMotion } from "./motion-probe.mjs";
+import { analyzeReference, REFERENCE_DIR, referencePrompt, writeReferenceProject } from "./reference.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
 import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
@@ -350,8 +352,55 @@ async function startFromHome(request) {
   await openStudio(dir);
 }
 
+function runEngineCaptured(args, cwd) {
+  return new Promise((resolve) => {
+    const child = runEngine(args, cwd);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
+    child.on("error", (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message}` }));
+    child.on("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function pickReference() {
+  const picked = await dialog.showOpenDialog(win, {
+    title: "Vidéo à reprendre",
+    defaultPath: homedir(),
+    properties: ["openFile"],
+    filters: [{ name: "Vidéos", extensions: ["mp4", "mov", "m4v", "webm"] }],
+  });
+  return picked.canceled ? null : picked.filePaths[0];
+}
+
+/** Home's « Refaire un montage »: a project cut like the picked video, its shots waiting for footage. */
+async function startFromReference(source) {
+  const file = String(source ?? "");
+  if (!existsSync(file) || !statSync(file).isFile()) throw new Error("Cette vidéo n'existe plus.");
+  const work = mkdtempSync(join(tmpdir(), "glintmotion-reference-"));
+  try {
+    const sheet = join(work, "shots.jpg");
+    const runBeats = (dir) => runEngineCaptured(["beats", "--json"], dir);
+    const analysis = await analyzeReference({ file, sheet, runBeats });
+    if (analysis.shotCount < 2) throw new Error("Aucune coupe trouvée dans cette vidéo : il n'y a pas de montage à reprendre.");
+    const parent = DEFAULT_PROJECTS_DIR;
+    const name = projectNameFor({ site: null, idea: `Remake ${basename(file, extname(file))}`, parent });
+    const resolution = analysis.resolution;
+    const dir = await createProject({ name, parent, resolution });
+    const built = await writeReferenceProject({ dir, analysis, resolution, title: name });
+    await copyFile(sheet, join(dir, REFERENCE_DIR, "shots.jpg"));
+    pendingPrompts.set(dir, referencePrompt({ source: basename(file), analysis, built }));
+    await openStudio(dir);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 ipcMain.handle("home:firstVideoParts", () => FIRST_VIDEO_PARTS);
 ipcMain.handle("home:start", (_event, request) => startFromHome(request));
+ipcMain.handle("home:pickReference", () => pickReference());
+ipcMain.handle("home:reference", (_event, file) => startFromReference(file));
 const listTemplates = () => readTemplates(templatesFile()).map((dir) => projectInfo(dir, null));
 ipcMain.handle("templates:list", listTemplates);
 ipcMain.handle("templates:set", (_event, request) =>

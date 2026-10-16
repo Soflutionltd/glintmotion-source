@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("glintmotion", {
   start: {
     firstVideoParts: () => ipcRenderer.invoke("home:firstVideoParts"),
     project: (request) => ipcRenderer.invoke("home:start", request),
+    pickReference: () => ipcRenderer.invoke("home:pickReference"),
+    reference: (file) => ipcRenderer.invoke("home:reference", file),
   },
   templates: {
     list: () => ipcRenderer.invoke("templates:list"),

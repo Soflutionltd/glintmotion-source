@@ -1,26 +1,13 @@
-# Security Policy
+# Security
 
-## Reporting a Vulnerability
+Please do not report a vulnerability in a public issue.
 
-If you discover a security vulnerability in Hyperframes, please report it responsibly.
+Open a [private security advisory](https://github.com/Soflutionltd/glintmotion-source/security/advisories/new)
+or write to contact@soflution.com with:
 
-**Do not open a public GitHub issue for security vulnerabilities.**
+- what an attacker can do, and what they need first;
+- the Glintmotion version and your macOS version;
+- the steps to reproduce it.
 
-Instead, open a [GitHub Security Advisory](https://github.com/heygen-com/hyperframes/security/advisories/new) with:
-
-- A description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-We will acknowledge receipt within 48 hours and aim to provide a fix or mitigation plan within 7 days.
-
-## Supported Versions
-
-| Version | Supported |
-| ------- | --------- |
-| 0.x     | Yes       |
-
-## Scope
-
-This policy applies to all packages in the `@hyperframes/*` npm scope and the code in this repository.
+You will get an answer within five working days. This policy covers the Glintmotion app, its
+local MCP server, its update service and the code in this repository.

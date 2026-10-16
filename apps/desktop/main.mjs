@@ -706,6 +706,7 @@ function startMcp() {
       deliver: (request) => trackDelivery(deliverRender({ projectDir: agentProjectDir(), ...request })),
       createProject,
       defaultParent: DEFAULT_PROJECTS_DIR,
+      effectsCacheFile: join(app.getPath("userData"), "effects-catalog.json"),
       listTemplates: () => listTemplates().map((info) => ({ ...info, variables: readVariables(info.path) })),
       createSeries: createSeriesFromRows,
     },

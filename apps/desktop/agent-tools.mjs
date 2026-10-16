@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
+import { addEffectArgs, loadEffectsCatalog, searchEffects } from "./effects.mjs";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
 import {
   cancelSimulatorTake,
@@ -501,6 +502,37 @@ export const AGENT_TOOLS = [
       required: ["args"],
     },
   },
+  {
+    name: "glintmotion_effects",
+    description: [
+      "Search the Glintmotion Effects catalog: each item's name, title, description (with how to use it),",
+      "tags, license and author. Every word of the query must match. Without query nor tag it lists the first",
+      "items and the total. The catalog is cached for a day and still answers offline.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "e.g. 'cube', 'page curl', 'glitch'." },
+        tag: { type: "string", description: "e.g. 'transition', '3d', 'wipe'." },
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 40 },
+      },
+    },
+  },
+  {
+    name: "glintmotion_add_effect",
+    description: [
+      "Install an effect from the Glintmotion Effects catalog into the open project (or `dir`), with the items",
+      "it depends on. Returns the files written. The project's hyperframes.json keeps its own catalog.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "An item name from glintmotion_effects, e.g. gl-cube." },
+        dir: { type: "string", description: "Absolute project folder. Default: the open project." },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
 export const MCP_INSTRUCTIONS = [
@@ -518,6 +550,7 @@ export const MCP_INSTRUCTIONS = [
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
   "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded. Another language: start with locale and app, stop with output and rewire false.",
+  "Effects: glintmotion_effects searches the Glintmotion Effects catalog (shader transitions such as gl-cube, gl-wind…), glintmotion_add_effect installs one; a transition then loads vendor/glintmotion/hyper-shader.js in place of the HyperShader CDN script, plus its own file. The HyperFrames catalog stays on glintmotion_cli catalog/add.",
   "Other engine commands (timeline, keyframes, beats, transcribe, tts, catalog, add…) go through glintmotion_cli.",
 ].join("\n");
 
@@ -534,6 +567,8 @@ export const MCP_INSTRUCTIONS = [
  *   createProject: (request: { name: string, parent: string, resolution: string }) => Promise<string>,
  *   openProject: (dir: string) => Promise<void>,
  *   defaultParent: string,
+ *   effectsCacheFile?: string,
+ *   fetch?: typeof fetch,
  *   listTemplates: () => object[],
  *   createSeries: (request: { template: string, rows: unknown, name?: string }) => { dir: string, unknown: string[] },
  *   renders: ReturnType<typeof import("./render-jobs.mjs").createRenderJobs>,
@@ -599,6 +634,27 @@ export function createAgentTools(app) {
     const reply = text({
       exitCode: run.code,
       ...(run.timedOut && { timedOut: `stopped after ${timeout} s` }),
+      ...(json ? { json } : { stdout: tail(run.stdout, OUTPUT_TAIL) }),
+      ...(run.stderr.trim() && { stderr: tail(run.stderr, 4000) }),
+    });
+    return run.code === 0 ? reply : { ...reply, isError: true };
+  }
+
+  async function effects({ query, tag, limit }) {
+    const catalog = await loadEffectsCatalog({ cacheFile: app.effectsCacheFile, fetchImpl: app.fetch });
+    const found = searchEffects(catalog.items, { query, tag, limit: clampNumber(limit, 1, 200, 40) });
+    return text({
+      source: catalog.source,
+      ...(catalog.warning && { warning: catalog.warning }),
+      ...found,
+    });
+  }
+
+  async function addEffect({ name, dir }) {
+    const run = await runCaptured(addEffectArgs(name), folder(dir), CLI_TIMEOUT_S);
+    const json = parseJson(run.stdout);
+    const reply = text({
+      exitCode: run.code,
       ...(json ? { json } : { stdout: tail(run.stdout, OUTPUT_TAIL) }),
       ...(run.stderr.trim() && { stderr: tail(run.stderr, 4000) }),
     });
@@ -983,6 +1039,8 @@ export function createAgentTools(app) {
     glintmotion_create_series: createSeries,
     glintmotion_series_sheet: seriesSheet,
     glintmotion_cli: cli,
+    glintmotion_effects: effects,
+    glintmotion_add_effect: addEffect,
   };
 
   return {

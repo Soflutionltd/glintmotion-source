@@ -118,7 +118,10 @@ export function targetSize(source, previous) {
   return { width: even(width * scale), height: even((width / ratio) * scale) };
 }
 
-/** ffmpeg arguments: constant frame rate, exact length, the last frame held when the source ends early. */
+/**
+ * ffmpeg arguments: constant frame rate, exact length, the last frame held when the source ends early, and a
+ * keyframe every second (the renderer seeks badly past 2 s between keyframes).
+ */
 export function fitArgs({ source, output, width, height, fps, seconds, from }) {
   return [
     "-y",
@@ -136,6 +139,8 @@ export function fitArgs({ source, output, width, height, fps, seconds, from }) {
     "70",
     "-profile:v",
     "high",
+    "-g",
+    String(Math.round(fps)),
     "-pix_fmt",
     "yuv420p",
     "-movflags",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -90,6 +91,7 @@ describe("fitArgs", () => {
     assert.deepEqual(args.slice(0, 5), ["-y", "-ss", "0.5", "-i", "in.mp4"]);
     assert.match(args[args.indexOf("-vf") + 1], /^fps=30,scale=900:1956:.*tpad=stop_mode=clone:stop_duration=5.4$/);
     assert.equal(args[args.indexOf("-t") + 1], "5.4");
+    assert.equal(args[args.indexOf("-g") + 1], "30");
   });
 });
 
@@ -167,6 +169,20 @@ describe("fitVideoIntoScene", () => {
     assert.deepEqual([stream.width, stream.height], [100, 200]);
     assert.equal(stream.avg_frame_rate, "30/1");
     assert.ok(Math.abs(Number(probe.format.duration) - 1.5) < 0.05, `duration ${probe.format.duration}`);
+    const keyframes = execFileSync("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "v",
+      "-skip_frame",
+      "nokey",
+      "-show_entries",
+      "frame=pts_time",
+      "-of",
+      "csv=p=0",
+      join(dir, "assets/rec/fr/switch.mp4"),
+    ], { encoding: "utf-8" });
+    assert.deepEqual(keyframes.trim().split("\n").map(Number.parseFloat), [0, 1], "a keyframe every second");
     assert.equal(findVideo(readFileSync(join(dir, "index.html"), "utf-8"), "v-grid").src, "assets/rec/fr/switch.mp4");
   });
 });

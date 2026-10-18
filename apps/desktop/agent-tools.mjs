@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
+import { colorMatch } from "./color-match.mjs";
 import { addEffectArgs, loadEffectsCatalog, searchEffects } from "./effects.mjs";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
 import {
@@ -78,6 +79,7 @@ const IMPORT_TYPES = {
   "audio/mp4": ".m4a",
 };
 const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+const GRADES_DIR = "assets/grades";
 const TAKE_ACTIONS = ["start", "stop", "cancel"];
 const REFERENCE_ACTIONS = ["analyze", "build", "snap"];
 const TAKE_FIT_PROPERTIES = {
@@ -314,6 +316,27 @@ export const AGENT_TOOLS = [
         name: { type: "string", description: "File name without extension, e.g. 'shot-03'. Default: from the URL." },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "glintmotion_color_match",
+    description: [
+      "Give a clip the colors of another shot (a generated clip next to app footage, two cameras): measures both",
+      `files, writes a matching 3D LUT under ${GRADES_DIR}/ and, with \`video\`, grades that <video id> with it`,
+      "(data-color-grading, live in the preview and the render; the file itself is not re-encoded). The report gives",
+      "the Oklab means and spreads of source, reference and the predicted result. Call inside a glintmotion_session,",
+      "then look at a frame of both shots.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Project-relative path of the clip to correct." },
+        reference: { type: "string", description: "Project-relative path of the clip or image whose look to match." },
+        video: { type: "string", description: "id of the <video> or <img> that plays source. Omit to only write the LUT." },
+        composition: { type: "string", description: "Project-relative composition file. Default index.html." },
+        intensity: { type: "number", minimum: 0, maximum: 1, default: 1, description: "How much of the match to apply." },
+      },
+      required: ["source", "reference"],
     },
   },
   {
@@ -638,7 +661,7 @@ export const MCP_INSTRUCTIONS = [
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
-  "Generated footage (Higgsfield or another generator's MCP): generate, glintmotion_import_media with the result URL, then glintmotion_fit_video into the scene.",
+  "Generated footage (Higgsfield or another generator's MCP): generate, glintmotion_import_media with the result URL, then glintmotion_fit_video into the scene, and glintmotion_color_match it to the shots around it.",
   "Remake a reference edit: glintmotion_reference analyze (look at the shot image), build, glintmotion_generate_music at the reference's bpm for the whole duration, glintmotion_reference snap inside a session, then fill each shot-NN with app footage (glintmotion_fit_video or glintmotion_simulator_take, video and name = the shot id), then check and a contact sheet.",
   "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded. Another language: start with locale and app, stop with output and rewire false.",
   "Effects: glintmotion_effects searches the Glintmotion Effects catalog (shader transitions such as gl-cube, gl-wind…), glintmotion_add_effect installs one; a transition then loads vendor/glintmotion/hyper-shader.js in place of the HyperShader CDN script, plus its own file. The HyperFrames catalog stays on glintmotion_cli catalog/add.",
@@ -1188,6 +1211,26 @@ export function createAgentTools(app) {
     return text({ path: `${IMPORT_DIR}/${file}`, bytes });
   }
 
+  async function matchColors({ source, reference, video, composition, intensity }) {
+    const sourceFile = mediaFile(source);
+    const referenceFile = mediaFile(reference);
+    const strength = intensity === undefined ? 1 : Number(intensity);
+    if (!(strength >= 0 && strength <= 1)) return failure("intensity must be between 0 and 1.");
+    if (video !== undefined && !/^[A-Za-z][\w-]*$/.test(String(video))) return failure("video must be an element id.");
+    const { cube, report } = await colorMatch(sourceFile, referenceFile);
+    const dir = app.projectDir();
+    const stem = basename(sourceFile, extname(sourceFile)).replace(/[^A-Za-z0-9._-]+/g, "-");
+    const lut = `${GRADES_DIR}/${stem}-match.cube`;
+    mkdirSync(join(dir, GRADES_DIR), { recursive: true });
+    writeFileSync(join(dir, lut), cube);
+    if (video === undefined) return text({ lut, ...report });
+    const grading = JSON.stringify({ lut: { src: lut, intensity: strength } });
+    const args = ["media-treatment", "--project", dir, "--file", composition ?? "index.html", "--selector", `#${video}`];
+    const run = await runCaptured([...args, "--grading", grading, "--apply", "--json"], dir, 60);
+    if (run.code !== 0) return failure(`The LUT is at ${lut}, but grading #${video} failed. ${tail(run.stderr || run.stdout, 1200)}`);
+    return text({ lut, graded: `#${video}`, intensity: strength, ...report });
+  }
+
   async function createSeries({ template, rows, name, open }) {
     const { dir, unknown } = app.createSeries({ template: String(template ?? ""), rows, name });
     if (open !== false) await app.openProject(dir);
@@ -1251,6 +1294,7 @@ export function createAgentTools(app) {
     glintmotion_contact_sheet: contactSheet,
     glintmotion_inspect_media: inspectMedia,
     glintmotion_import_media: importMedia,
+    glintmotion_color_match: matchColors,
     glintmotion_fit_video: fitVideo,
     glintmotion_simulator_take: simulatorTake,
     glintmotion_reference: reference,

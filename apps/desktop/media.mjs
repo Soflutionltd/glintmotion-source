@@ -27,7 +27,7 @@ export const DELIVERY_PRESETS = {
   original: { label: "Format d'origine", size: null },
 };
 
-function findFfmpeg() {
+export function findFfmpeg() {
   const found = FFMPEG_CANDIDATES.find((candidate) => existsSync(candidate));
   if (!found) throw new Error("ffmpeg est introuvable sur ce Mac (brew install ffmpeg).");
   return found;

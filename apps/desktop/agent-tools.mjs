@@ -64,6 +64,20 @@ const SHARE_FOLDERS = ["renders", "snapshots"];
 const SIGNED_UPLOAD_PATH = "/storage/v1/object/upload/sign/";
 const UPLOAD_TYPES = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const IMPORT_DIR = "assets/generated";
+const IMPORT_TYPES = {
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "audio/mpeg": ".mp3",
+  "audio/wav": ".wav",
+  "audio/x-wav": ".wav",
+  "audio/mp4": ".m4a",
+};
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 const TAKE_ACTIONS = ["start", "stop", "cancel"];
 const REFERENCE_ACTIONS = ["analyze", "build", "snap"];
 const TAKE_FIT_PROPERTIES = {
@@ -284,6 +298,22 @@ export const AGENT_TOOLS = [
         views: { type: "array", items: { type: "string", enum: MEDIA_VIEWS }, default: ["probe"] },
       },
       required: ["path"],
+    },
+  },
+  {
+    name: "glintmotion_import_media",
+    description: [
+      "Download a generated video, image or audio file (the https result URL a generator such as Higgsfield",
+      `returns) into the project, under ${IMPORT_DIR}/. Returns its project-relative path: then`,
+      "glintmotion_inspect_media, and glintmotion_fit_video to place a clip in a scene's <video>.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "https URL of the file." },
+        name: { type: "string", description: "File name without extension, e.g. 'shot-03'. Default: from the URL." },
+      },
+      required: ["url"],
     },
   },
   {
@@ -608,6 +638,7 @@ export const MCP_INSTRUCTIONS = [
   "Series (several versions of one design): glintmotion_list_templates, glintmotion_create_series with one row of variables per version, glintmotion_series_sheet (rewrite the lines it reports as repeated), glintmotion_check with each row's variables, then glintmotion_render with series: true.",
   "Text in motion: follow the motion-quality skill (moderate eases on y, scale from the baseline, no will-change on scaled text), then glintmotion_motion_check.",
   "Media: glintmotion_inspect_media before placing a file; glintmotion_generate_music for a bed.",
+  "Generated footage (Higgsfield or another generator's MCP): generate, glintmotion_import_media with the result URL, then glintmotion_fit_video into the scene.",
   "Remake a reference edit: glintmotion_reference analyze (look at the shot image), build, glintmotion_generate_music at the reference's bpm for the whole duration, glintmotion_reference snap inside a session, then fill each shot-NN with app footage (glintmotion_fit_video or glintmotion_simulator_take, video and name = the shot id), then check and a contact sheet.",
   "App footage: glintmotion_simulator_take start, drive the simulator, then stop with the scene's `video` id; glintmotion_fit_video does the same for a file already recorded. Another language: start with locale and app, stop with output and rewire false.",
   "Effects: glintmotion_effects searches the Glintmotion Effects catalog (shader transitions such as gl-cube, gl-wind…), glintmotion_add_effect installs one; a transition then loads vendor/glintmotion/hyper-shader.js in place of the HyperShader CDN script, plus its own file. The HyperFrames catalog stays on glintmotion_cli catalog/add.",
@@ -1122,6 +1153,41 @@ export function createAgentTools(app) {
     return text({ uploaded: basename(path), bytes: bytes.byteLength, contentType });
   }
 
+  async function importMedia({ url, name }) {
+    let source;
+    try {
+      source = new URL(String(url ?? ""));
+    } catch {
+      return failure("url is not a URL.");
+    }
+    if (source.protocol !== "https:") return failure("Only https URLs are imported.");
+    const response = await (app.fetch ?? fetch)(source);
+    if (!response.ok || !response.body) return failure(`The download failed (${response.status}).`);
+    const type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const fromPath = extname(source.pathname).toLowerCase().replace(".jpeg", ".jpg");
+    const extension = IMPORT_TYPES[type] ?? (Object.values(IMPORT_TYPES).includes(fromPath) ? fromPath : null);
+    if (!extension) return failure(`Import video, image or audio files, not ${type || "this file"}.`);
+    if (Number(response.headers.get("content-length")) > MAX_IMPORT_BYTES) {
+      return failure("The file is over 1 GB.");
+    }
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of response.body) {
+      bytes += chunk.byteLength;
+      if (bytes > MAX_IMPORT_BYTES) return failure("The file is over 1 GB.");
+      chunks.push(chunk);
+    }
+    const stem =
+      String(name ?? "").trim() || basename(source.pathname, extname(source.pathname)) || "generated";
+    const safeStem = stem.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "").slice(0, 80) || "generated";
+    const folder = join(app.projectDir(), IMPORT_DIR);
+    mkdirSync(folder, { recursive: true });
+    let file = `${safeStem}${extension}`;
+    for (let n = 2; existsSync(join(folder, file)); n += 1) file = `${safeStem}-${n}${extension}`;
+    writeFileSync(join(folder, file), Buffer.concat(chunks));
+    return text({ path: `${IMPORT_DIR}/${file}`, bytes });
+  }
+
   async function createSeries({ template, rows, name, open }) {
     const { dir, unknown } = app.createSeries({ template: String(template ?? ""), rows, name });
     if (open !== false) await app.openProject(dir);
@@ -1184,6 +1250,7 @@ export function createAgentTools(app) {
     glintmotion_motion_check: motionCheck,
     glintmotion_contact_sheet: contactSheet,
     glintmotion_inspect_media: inspectMedia,
+    glintmotion_import_media: importMedia,
     glintmotion_fit_video: fitVideo,
     glintmotion_simulator_take: simulatorTake,
     glintmotion_reference: reference,

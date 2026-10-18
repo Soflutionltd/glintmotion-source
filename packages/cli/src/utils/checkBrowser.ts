@@ -578,6 +578,7 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     hasNoTimelineDeclaration: () => hasNoTimelineDeclaration(page),
     getTransitionBoundaries: () => collectTweenBoundaries(page),
     getTweenSpans: () => collectTweenSpans(page),
+    getClipEdges: () => collectClipEdges(page),
     getCanvas: () =>
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
     findAmbiguousSelectors: (selectors) => findAmbiguousSelectors(page, selectors),
@@ -649,6 +650,16 @@ async function getCompositionDuration(page: Page): Promise<number> {
       if (duration) return duration;
     }
     return 0;
+  });
+}
+
+async function collectClipEdges(page: Page): Promise<number[]> {
+  return page.evaluate(() => {
+    type Clip = { kind: string; start: number; duration: number };
+    const manifest = Reflect.get(window, "__clipManifest") as { clips?: Clip[] } | undefined;
+    return (manifest?.clips ?? [])
+      .filter((clip) => clip.kind !== "audio")
+      .flatMap((clip) => [clip.start, clip.start + clip.duration]);
   });
 }
 

@@ -201,6 +201,7 @@ export interface CheckAuditDriver {
   getTransitionBoundaries(): Promise<number[]>;
   /** Every tween on the root clock with its text-bearing targets, for the text-at-rest samples. */
   getTweenSpans?(): Promise<TweenSpan[]>;
+  getClipEdges(): Promise<number[]>;
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
   seek(time: number): Promise<void>;

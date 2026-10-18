@@ -77,6 +77,42 @@ skillsButton.addEventListener("click", async () => {
 
 api.skills.status().then(showSkills);
 
+const higgsfieldButton = document.getElementById("higgsfield-connect");
+const higgsfieldHelp = document.getElementById("higgsfield-help");
+const higgsfieldPitch = higgsfieldHelp.textContent;
+
+function showHiggsfield(status) {
+  higgsfieldButton.disabled = status.connecting;
+  higgsfieldButton.textContent = status.connecting
+    ? "Dans le navigateur…"
+    : status.connected
+      ? "Déconnecter"
+      : "Connecter";
+  higgsfieldButton.dataset.connected = String(status.connected);
+  higgsfieldHelp.textContent = status.connected
+    ? `Connecté${status.email ? ` en tant que ${status.email}` : ""}. L'agent de Glintmotion peut générer des plans sur tes crédits Higgsfield.`
+    : higgsfieldPitch;
+}
+
+higgsfieldButton.addEventListener("click", async () => {
+  const connected = higgsfieldButton.dataset.connected === "true";
+  try {
+    if (connected) {
+      showHiggsfield(await api.higgsfield.disconnect());
+      showToast("Higgsfield déconnecté");
+      return;
+    }
+    showHiggsfield({ connected: false, connecting: true });
+    showHiggsfield(await api.higgsfield.connect());
+    showToast("Higgsfield connecté");
+  } catch (error) {
+    showHiggsfield(await api.higgsfield.status());
+    showToast(error.message);
+  }
+});
+
+api.higgsfield.status().then(showHiggsfield);
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     await api.mcp.copy(snippets[button.dataset.copy]);

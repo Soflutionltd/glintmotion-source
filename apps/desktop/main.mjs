@@ -34,6 +34,7 @@ import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHiggsfieldAccount, HIGGSFIELD_MCP_URL } from "./higgsfield.mjs";
 import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { cancelSimulatorTake } from "./takes.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
@@ -446,11 +447,14 @@ const AGENT_SYSTEM_PROMPT = [
   "glintmotion_contact_sheet to see the whole video, glintmotion_motion_check after animating text,",
   "and glintmotion_session begin/end around your changes so the person can undo them in one step.",
   "In a series project (series.json, one row of variables per version), glintmotion_series_sheet shows every version side by side.",
+  "When mcp__higgsfield__* tools are present, the person has connected their Higgsfield account: generate the video or image they ask for with their credits,",
+  "then glintmotion_import_media with the result URL and glintmotion_fit_video to place a clip in a scene.",
 ].join(" ");
 const AGENT_ALLOWED_TOOLS = [
   "Bash(npm run check)",
   "Bash(glintmotion capture *)",
   "mcp__glintmotion__*",
+  "mcp__higgsfield__*",
   ...CLI_COMMANDS.flatMap((command) => [`Bash(glintmotion ${command})`, `Bash(glintmotion ${command} *)`]),
 ];
 
@@ -467,11 +471,21 @@ const AGENT_BLOCKED_TOOLS = [
 ].map((name) => `mcp__glintmotion__${name}`);
 
 /** The token goes in a private file rather than argv, where `ps` would show it. */
-function agentMcpArgs() {
+const higgsfield = createHiggsfieldAccount({
+  file: join(app.getPath("userData"), "higgsfield.bin"),
+  safeStorage,
+  openExternal: (url) => shell.openExternal(url),
+});
+
+async function agentMcpArgs() {
   if (!mcp || mcp.error) return [];
   const file = join(app.getPath("userData"), "agent-mcp.json");
-  const server = { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } };
-  writeFileSync(file, JSON.stringify({ mcpServers: { glintmotion: server } }), { mode: 0o600 });
+  const servers = { glintmotion: { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } } };
+  const higgsfieldToken = await higgsfield.accessToken();
+  if (higgsfieldToken) {
+    servers.higgsfield = { type: "http", url: HIGGSFIELD_MCP_URL, headers: { Authorization: `Bearer ${higgsfieldToken}` } };
+  }
+  writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
   chmodSync(file, 0o600);
   return ["--mcp-config", file, "--strict-mcp-config", "--disallowedTools", ...AGENT_BLOCKED_TOOLS];
 }
@@ -642,7 +656,7 @@ function forwardAgentLine(line, dir) {
         const target = input.file_path ?? input.path ?? input.pattern ?? input.command ?? "";
         sendAgentEvent({
           kind: "tool",
-          name: block.name.replace(/^mcp__glintmotion__/, ""),
+          name: block.name.replace(/^mcp__glintmotion__/, "").replace(/^mcp__higgsfield__/, "higgsfield · "),
           target: String(target).replace(`${dir}/`, ""),
         });
       }
@@ -657,7 +671,7 @@ function forwardAgentLine(line, dir) {
   }
 }
 
-function startAgent({ prompt, model }) {
+async function startAgent({ prompt, model }) {
   if (!studio) throw new Error("Aucun projet ouvert.");
   if (agentRun) throw new Error("L'agent travaille déjà sur une demande.");
   const text = String(prompt ?? "").trim();
@@ -666,6 +680,9 @@ function startAgent({ prompt, model }) {
 
   const claude = findClaude();
   const dir = studio.dir;
+  const mcpArgs = await agentMcpArgs();
+  if (agentRun) throw new Error("L'agent travaille déjà sur une demande.");
+  if (studio?.dir !== dir) throw new Error("Le projet a changé pendant le lancement de l'agent.");
   const args = [
     "-p",
     text,
@@ -674,7 +691,7 @@ function startAgent({ prompt, model }) {
     "--verbose",
     "--model",
     model,
-    ...agentMcpArgs(),
+    ...mcpArgs,
     "--permission-mode",
     "acceptEdits",
     "--allowedTools",
@@ -824,6 +841,9 @@ ipcMain.handle("skills:install", () =>
 ipcMain.handle("mcp:info", () => mcp);
 ipcMain.handle("mcp:copy", (_event, value) => clipboard.writeText(String(value)));
 ipcMain.handle("mcp:open", () => openConnectWindow());
+ipcMain.handle("higgsfield:status", () => higgsfield.status());
+ipcMain.handle("higgsfield:connect", () => higgsfield.connect());
+ipcMain.handle("higgsfield:disconnect", () => higgsfield.disconnect());
 
 ipcMain.handle("agent:models", () => AGENT_MODELS);
 ipcMain.handle("agent:send", (_event, request) => startAgent(request ?? {}));

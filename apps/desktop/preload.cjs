@@ -36,6 +36,11 @@ contextBridge.exposeInMainWorld("glintmotion", {
     copy: (value) => ipcRenderer.invoke("mcp:copy", value),
     open: () => ipcRenderer.invoke("mcp:open"),
   },
+  higgsfield: {
+    status: () => ipcRenderer.invoke("higgsfield:status"),
+    connect: () => ipcRenderer.invoke("higgsfield:connect"),
+    disconnect: () => ipcRenderer.invoke("higgsfield:disconnect"),
+  },
   cli: {
     status: () => ipcRenderer.invoke("cli:status"),
     install: () => ipcRenderer.invoke("cli:install"),

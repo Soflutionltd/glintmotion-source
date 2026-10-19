@@ -8,6 +8,21 @@ const QUALITIES = ["draft", "looks", "delivery"];
 const RESOLUTIONS = ["landscape", "portrait", "square", "landscape-4k", "portrait-4k", "square-4k"];
 const KEEP_JOBS = 20;
 const LOG_TAIL = 4000;
+const RECALIBRATE_AFTER = 10;
+const TRACE_MARK = "[Render:trace] ";
+
+/** Capture cost depends on the scene and the frame size, so a calibrated worker count is reused only for both. */
+const workerKey = (dir, options) => JSON.stringify([dir, options.composition ?? "index.html", options.resolution ?? null]);
+
+function readTrace(line) {
+  const at = line.indexOf(TRACE_MARK);
+  if (at === -1) return null;
+  try {
+    return JSON.parse(line.slice(at + TRACE_MARK.length).replace(/\u001b\[[0-9;]*m/g, ""));
+  } catch {
+    return null;
+  }
+}
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
@@ -18,10 +33,11 @@ function projectRelative(value, label) {
 }
 
 /** Engine arguments for one render request; validates every field the agent controls. */
-export function renderArgs(dir, options, batchFile, outputKey = "index") {
+export function renderArgs(dir, options, batchFile, outputKey = "index", workers = null) {
   const format = options.format ?? "mp4";
   if (!FORMATS.includes(format)) throw new Error(`Unsupported format: ${format}`);
   const args = ["render", dir, "--format", format];
+  if (workers) args.push("--workers", String(workers));
   if (options.quality !== undefined) {
     if (!QUALITIES.includes(options.quality)) throw new Error(`quality is one of ${QUALITIES.join(", ")}`);
     args.push("--quality", options.quality);
@@ -83,8 +99,12 @@ function batchResult(log) {
   };
 }
 
-/** One engine render at a time, run in the background so an agent can poll instead of holding a call open. */
-export function createRenderJobs({ runEngine }) {
+/**
+ * One engine render at a time, run in the background so an agent can poll instead of holding a call open.
+ * `workerMemory` (get/set/delete) keeps the worker count the engine's calibration picked, so later
+ * renders of the same scene skip that measuring pass.
+ */
+export function createRenderJobs({ runEngine, workerMemory = null }) {
   const jobs = new Map();
   let counter = 0;
 
@@ -115,7 +135,10 @@ export function createRenderJobs({ runEngine }) {
     if (code === 0 && produced) {
       job.status = "done";
       job.progress = 100;
+      if (job.calibratedWorkers) workerMemory?.set(job.workerKey, { workers: job.calibratedWorkers, uses: 0 });
+      else if (job.workers) workerMemory?.set(job.workerKey, { workers: job.workers, uses: job.workerUses + 1 });
     } else {
+      if (job.workers) workerMemory?.delete(job.workerKey);
       job.status = "failed";
       job.error = `Render failed (${signal ?? `code ${code}`}). ${job.log.slice(-600)}`.trim();
     }
@@ -140,7 +163,10 @@ export function createRenderJobs({ runEngine }) {
       batchFile = join(tmpdir(), `glintmotion-batch-${process.pid}-${Date.now()}.json`);
       writeFileSync(batchFile, JSON.stringify(options.batch));
     }
-    const { args, output } = renderArgs(dir, options, batchFile, outputKey);
+    const key = workerKey(dir, options);
+    const remembered = workerMemory?.get(key);
+    const workers = remembered && remembered.uses < RECALIBRATE_AFTER ? remembered.workers : null;
+    const { args, output } = renderArgs(dir, options, batchFile, outputKey, workers);
     mkdirSync(join(dir, "renders"), { recursive: true });
     const child = runEngine(args, dir);
     const job = {
@@ -148,6 +174,11 @@ export function createRenderJobs({ runEngine }) {
       dir,
       child,
       batchFile,
+      workerKey: key,
+      workers,
+      workerUses: workers ? remembered.uses : 0,
+      calibrated: false,
+      calibratedWorkers: null,
       status: "running",
       progress: 0,
       stage: "Starting",
@@ -172,6 +203,12 @@ export function createRenderJobs({ runEngine }) {
       for (const line of lines) {
         const update = readProgress(line);
         if (update) Object.assign(job, update);
+        const trace = readTrace(line);
+        if (trace?.status !== "checkpoint" || trace.message !== "resolved") continue;
+        if (trace.phase === "capture_calibration") job.calibrated = true;
+        if (trace.phase === "capture_strategy" && job.calibrated && Number.isInteger(trace.workerCount)) {
+          job.calibratedWorkers = trace.workerCount;
+        }
       }
     };
     child.stdout.on("data", onData);

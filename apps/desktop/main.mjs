@@ -731,7 +731,10 @@ async function startAgent({ prompt, model }) {
   });
 }
 
-const renders = createRenderJobs({ runEngine });
+const renders = createRenderJobs({
+  runEngine,
+  workerMemory: createPersistentMap(join(app.getPath("userData"), "render-workers.json")),
+});
 
 let motionRun = null;
 async function checkMotion(request) {

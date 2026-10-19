@@ -8,11 +8,12 @@
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { realpath } from "@hyperframes/core";
-import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { resolve, join, basename, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { readBundleFile } from "./readBundleFile.js";
 import {
   createProjectWatcher,
@@ -38,6 +39,8 @@ import { isDevMode } from "../utils/env.js";
 import { runRenderSetupWorker } from "../utils/cancellableProcess.js";
 import type { ProjectLintResult } from "@hyperframes/lint";
 import { resolveRenderBrowser } from "../browser/preflight.js";
+import { insideHostApp } from "../utils/desktopApp.js";
+import { createExportPreparation } from "./exportPreparation.js";
 import {
   createStudioManualEditsRenderBodyScript,
   createStudioApi,
@@ -94,6 +97,8 @@ const RENDER_SHUTDOWN_WAIT_MS = 2_000;
 // public/ files land at the dist root. The route is the signal because the
 // filename is not: rollup's base64url hash may itself contain a hyphen.
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+const SILENT_LOGGER = { error() {}, warn() {}, info() {}, debug() {} };
 
 const REMOTE_GIF_IMG_SRC_RE =
   /<img\b[^>]*?\bsrc\s*=\s*["'](https?:\/\/[^"']+\.gif(?:[?#][^"']*)?)["'][^>]*>/gi;
@@ -488,6 +493,44 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
   // launching a browser shutdown() has no way to know about and close.
   let shuttingDown = false;
 
+  // In the app, an idle project gets its video frames extracted into the shared cache, so the
+  // next export (Studio's or the agent's, both 30 fps by default) skips that step.
+  const exportPreparation = insideHostApp()
+    ? createExportPreparation(async (signal) => {
+        if (shuttingDown || inFlightRenders.size > 0) return;
+        const { createRenderJob, executeRenderJob } = await loadStudioProducer();
+        const browser = await resolveRenderBrowser(signal);
+        if (!process.env.PRODUCER_HEADLESS_SHELL_PATH) {
+          process.env.PRODUCER_HEADLESS_SHELL_PATH = browser.executablePath;
+        }
+        const manualEditsRenderScript = createStudioManualEditsRenderBodyScript(
+          readStudioManualEditManifestContent(projectDir),
+        );
+        const job = createRenderJob({
+          fps: 30,
+          quality: "standard",
+          format: "mp4",
+          extractOnly: true,
+          logger: SILENT_LOGGER,
+          ...(manualEditsRenderScript ? { renderBodyScripts: [manualEditsRenderScript] } : {}),
+        });
+        const outputDir = join(tmpdir(), `hyperframes-prepare-${process.pid}-${job.id}`);
+        try {
+          await executeRenderJob(
+            job,
+            projectDir,
+            join(outputDir, "prepare.mp4"),
+            undefined,
+            signal,
+          );
+        } finally {
+          rmSync(outputDir, { recursive: true, force: true });
+        }
+      })
+    : null;
+  watcher.addListener(() => exportPreparation?.schedule());
+  exportPreparation?.schedule();
+
   const adapter: PreviewApiAdapter = {
     history: () => projectHistory(),
     // Explicit option wins (preview's resolved --proxy/--no-proxy + config);
@@ -583,6 +626,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
           error: "Studio server is shutting down",
         };
       }
+      exportPreparation?.stop();
       // The render POST is a request boundary like any other. Without this an
       // already-open Studio tab keeps rendering under the posture cached when
       // the server booted.
@@ -1015,6 +1059,12 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
   });
 
   mountDesktopRoutes(app, projectDir);
+  // The app calls this before an agent export, which runs in its own process and would otherwise
+  // extract the same frames alongside the preparation.
+  app.post("/api/export-preparation/pause", (c) => {
+    exportPreparation?.stop();
+    return c.body(null, 204);
+  });
 
   // ── Pre-flight checks for render ────────────────────────────────────────
   // Intercept render requests before they reach the shared API so we can
@@ -1170,6 +1220,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const shutdown = async (): Promise<void> => {
     shuttingDown = true;
+    exportPreparation?.stop();
     // Commits any open edit window; bounded with the renders below, so a history still opening cannot hold exit.
     const closeHistory = histories.closeAll().catch(() => {});
     const renders = [...inFlightRenders];

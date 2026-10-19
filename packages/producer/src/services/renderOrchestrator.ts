@@ -392,6 +392,11 @@ export interface RenderConfig {
   workers?: number;
   useGpu?: boolean;
   debug?: boolean;
+  /**
+   * Stop once the video frames are extracted, writing no output: fills the extraction cache
+   * for a later render with the same fps, HDR mode and frame format.
+   */
+  extractOnly?: boolean;
   /** Strict rejects correctness warnings; best-effort returns a qualified outcome. */
   strictness?: RenderStrictness;
   /** Entry HTML file relative to projectDir. Defaults to "index.html". */
@@ -3047,6 +3052,7 @@ async function executeRenderPipeline(input: {
     let compiled = compileResult.compiled;
     compositionHash = computeCompositionObservabilityHash(compiled.html);
     const composition = compileResult.composition;
+    if (job.config.extractOnly && composition.videos.length === 0) return;
     const { deviceScaleFactor, outputWidth, outputHeight } = compileResult;
     const { width, height } = composition;
     // Capture the *output* (device-scaled) dimensions for the OOM error path —
@@ -3313,6 +3319,7 @@ async function executeRenderPipeline(input: {
       minVideoFrameCoverageRatio: extractionObservability.minVideoFrameCoverageRatio ?? null,
       authoredTimedClipCount: extractionObservability.authoredTimedClipCount ?? null,
     });
+    if (job.config.extractOnly) return;
     if (failureToEnforce) throw failureToEnforce;
     // Gate AFTER the checkpoint so a coverage-failed render still emits
     // the observability row (partial telemetry is still worth having).

@@ -43,7 +43,7 @@
     "check:studio-copy-dashes": "node scripts/check-studio-copy-dashes.mjs",
     "format": "oxfmt .",
     "test": "bun run test:unit",
-    "test:unit": "bun run --filter '*' test",
+    "test:unit": "bun run --filter '*' --sequential --no-exit-on-error test",
     "producer:test:classification": "bun run --cwd packages/producer test:classification",
     "producer:test:unit": "bun run --cwd packages/producer test:unit",
     "producer:test:unit:bun": "bun run --cwd packages/producer test:unit:bun",

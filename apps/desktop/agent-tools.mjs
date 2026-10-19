@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
-import { colorMatch } from "./color-match.mjs";
+import { colorMatch, readColorProbe, writeColorProbe } from "./color-match.mjs";
 import { addEffectArgs, loadEffectsCatalog, searchEffects } from "./effects.mjs";
 import { DELIVERY_PRESETS, probeMedia, runFfmpeg } from "./media.mjs";
 import {
@@ -323,9 +323,11 @@ export const AGENT_TOOLS = [
     description: [
       "Give a clip the colors of another shot (a generated clip next to app footage, two cameras): measures both",
       `files, writes a matching 3D LUT under ${GRADES_DIR}/ and, with \`video\`, grades that <video id> with it`,
-      "(data-color-grading, live in the preview and the render; the file itself is not re-encoded). The report gives",
-      "the Oklab means and spreads of source, reference and the predicted result. Call inside a glintmotion_session,",
-      "then look at a frame of both shots.",
+      "(data-color-grading, live in the preview and the render; the file itself is not re-encoded). Two short engine",
+      "renders correct what the export does to graded colors and measure the result (about 7 s). The report gives",
+      "the Oklab means and spreads of source and reference, and `exported`: the graded source and the reference as",
+      "the export shows them. `bounded: true` means the shots differ in content more than in grade: look at a frame",
+      "before keeping it, or lower intensity. Call inside a glintmotion_session, then look at a frame of both shots.",
     ].join(" "),
     inputSchema: {
       type: "object",
@@ -1217,7 +1219,33 @@ export function createAgentTools(app) {
     const strength = intensity === undefined ? 1 : Number(intensity);
     if (!(strength >= 0 && strength <= 1)) return failure("intensity must be between 0 and 1.");
     if (video !== undefined && !/^[A-Za-z][\w-]*$/.test(String(video))) return failure("video must be an element id.");
-    const { cube, report } = await colorMatch(sourceFile, referenceFile);
+    const probeDir = mkdtempSync(join(tmpdir(), "glintmotion-color-"));
+    let match;
+    try {
+      await writeColorProbe(probeDir, sourceFile, referenceFile);
+      let probeGraded = false;
+      const renderProbe = async (lutText) => {
+        writeFileSync(join(probeDir, "grade.cube"), lutText);
+        if (!probeGraded) {
+          const probeGrading = JSON.stringify({ lut: { src: "grade.cube", intensity: 1 } });
+          const treatArgs = ["media-treatment", "--project", probeDir, "--file", "index.html", "--selector", "#source"];
+          const treat = await runCaptured([...treatArgs, "--grading", probeGrading, "--apply", "--json"], probeDir, 60);
+          if (treat.code !== 0) throw new Error(`Could not grade the color probe. ${tail(treat.stderr || treat.stdout, 600)}`);
+          probeGraded = true;
+        }
+        const output = join(probeDir, "probe.mp4");
+        const args = ["render", probeDir, "--fps", "30", "--quality", "delivery", "--workers", "1", "--output", output];
+        const run = await runCaptured(args, probeDir, 120);
+        if (run.code !== 0 || !existsSync(output)) {
+          throw new Error(`The engine could not render the color probe. ${tail(run.stderr || run.stdout, 600)}`);
+        }
+        return readColorProbe(output);
+      };
+      match = await colorMatch(sourceFile, referenceFile, { renderProbe });
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
+    const { cube, report } = match;
     const dir = app.projectDir();
     const stem = basename(sourceFile, extname(sourceFile)).replace(/[^A-Za-z0-9._-]+/g, "-");
     const lut = `${GRADES_DIR}/${stem}-match.cube`;

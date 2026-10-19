@@ -10,6 +10,9 @@
 // video length, same content). --curve-only adds that curve to an existing --out file for the first
 // composition given.
 //
+// --engine <hyperframes.mjs> times another build of the engine (a checkout's packages/cli/bin) under the
+// app's own runtime, to measure the next release before it is installed.
+//
 // Compositions are rendered in place: point it at copies, the engines write caches next to index.html.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -20,7 +23,6 @@ import { parseArgs } from "node:util";
 
 const APP = "/Applications/Glintmotion.app";
 const APP_BINARY = join(APP, "Contents/MacOS/Glintmotion");
-const APP_ENGINE = join(APP, "Contents/Resources/engine/node_modules/@hyperframes/cli/bin/hyperframes.mjs");
 const APP_CHROME = join(APP, "Contents/Resources/chrome/chrome-headless-shell");
 const COOLDOWN_MS = 5000;
 
@@ -28,6 +30,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     upstream: { type: "string" },
+    engine: { type: "string" },
     runs: { type: "string", default: "3" },
     out: { type: "string" },
     partial: { type: "string", default: "10-14" },
@@ -39,6 +42,9 @@ if (!values.upstream || !values.out || positionals.length === 0) {
   console.error("Usage: --upstream <dir with hyperframes installed> --out <results.json> <composition dir>...");
   process.exit(2);
 }
+const APP_ENGINE = values.engine
+  ? resolve(values.engine)
+  : join(APP, "Contents/Resources/engine/node_modules/@hyperframes/cli/bin/hyperframes.mjs");
 for (const file of [APP_BINARY, APP_ENGINE, APP_CHROME]) {
   if (!existsSync(file)) throw new Error(`Missing ${file}: install Glintmotion in /Applications first.`);
 }
@@ -207,6 +213,7 @@ const report = {
   versions: {
     glintmotion: execFileSync("defaults", ["read", join(APP, "Contents/Info.plist"), "CFBundleShortVersionString"], { encoding: "utf-8" }).trim(),
     glintmotionEngine: packageVersion(APP_ENGINE),
+    glintmotionEngineFrom: values.engine ? "source checkout, under the app's runtime" : "installed app",
     hyperframes: packageVersion(upstreamEntry),
   },
   method: `${runs} runs per engine, interleaved, median kept; same Chrome (${basename(APP_CHROME)} from the app) and the same ffmpeg for every engine; default render settings, plus upstream with --gpu.`,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildVideoToolboxRateControlArgs,
   getCompiledGpuEncoders,
   getGpuEncoderName,
   getProbeArgs,
@@ -144,5 +145,48 @@ describe("getProbeArgs", () => {
     expect(args).not.toContain("-q:v");
     expect(args[args.indexOf("-b:v") + 1]).toBe("1M");
     expect(args[args.indexOf("-allow_sw") + 1]).toBe("1");
+  });
+
+  it("can probe VideoToolbox's constant-quality option", () => {
+    const args = getProbeArgs("videotoolbox", { constantQuality: true });
+
+    expect(args).not.toContain("-b:v");
+    expect(args[args.indexOf("-q:v") + 1]).toBe("65");
+  });
+});
+
+describe("buildVideoToolboxRateControlArgs", () => {
+  const frame = { width: 1080, height: 1920, fps: 30 };
+
+  it.each([
+    [15, "80"],
+    [16, "75"],
+    [18, "75"],
+    [28, "65"],
+  ])("maps CRF %i to VideoToolbox quality %s when -q:v is supported", (quality, expected) => {
+    const args = buildVideoToolboxRateControlArgs({ ...frame, quality, constantQuality: true });
+
+    expect(args).toEqual(["-q:v", expected, "-allow_sw", "1"]);
+  });
+
+  it("keeps the pixel-rate bitrate when -q:v is not supported", () => {
+    const args = buildVideoToolboxRateControlArgs({
+      ...frame,
+      quality: 16,
+      constantQuality: false,
+    });
+
+    expect(args).toEqual(["-b:v", "10M", "-allow_sw", "1"]);
+  });
+
+  it("lets an explicit bitrate win over constant quality", () => {
+    const args = buildVideoToolboxRateControlArgs({
+      ...frame,
+      quality: 16,
+      bitrate: "6M",
+      constantQuality: true,
+    });
+
+    expect(args).toEqual(["-b:v", "6M", "-allow_sw", "1"]);
   });
 });

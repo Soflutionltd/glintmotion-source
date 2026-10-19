@@ -360,5 +360,9 @@ export default defineConfig({
   test: {
     exclude: ["data/**", "node_modules/**"],
     setupFiles: ["src/test-setup.ts"],
+    // Node 25 turns on its own localStorage, which shadows happy-dom's and has no clear().
+    execArgv: Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+      ? ["--no-experimental-webstorage"]
+      : [],
   },
 });

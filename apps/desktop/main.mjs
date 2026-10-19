@@ -732,7 +732,12 @@ async function startAgent({ prompt, model }) {
 }
 
 const renders = createRenderJobs({
-  runEngine,
+  // The studio extracts an idle project's video frames ahead of time; an export in its own
+  // process would extract them a second time alongside, so the studio stops first.
+  runEngine: (args, cwd) => {
+    if (studio?.url) fetch(new URL("/api/export-preparation/pause", studio.url), { method: "POST" }).catch(() => {});
+    return runEngine(args, cwd);
+  },
   workerMemory: createPersistentMap(join(app.getPath("userData"), "render-workers.json")),
 });
 

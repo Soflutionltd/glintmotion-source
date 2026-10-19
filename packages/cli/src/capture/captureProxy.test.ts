@@ -85,6 +85,8 @@ describe("capture proxy", () => {
     const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
     await new Promise<void>((resolve) => socket.once("connect", resolve));
     const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+    // Teardown may reset the connection rather than end it (ECONNRESET on macOS); both close it.
+    socket.on("error", () => {});
     await proxy.close();
     await closed;
   });

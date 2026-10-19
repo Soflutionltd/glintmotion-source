@@ -52,6 +52,7 @@ import {
 import { encoderFailureError } from "../render/encoderInterruption.js";
 import type { ChunkSliceJson, LockedRenderConfig } from "../render/stages/freezePlan.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
+import { writeStitchedMp4 } from "./mp4Stitch.js";
 import { validatePlanV2MaterializedTarget } from "./planV2.js";
 import type { DistributedFormat } from "./shared.js";
 
@@ -139,6 +140,16 @@ export async function assemble(
   if (plan.dimensions.format === "png-sequence") {
     // ── 2a. png-sequence: merge frame directories with global re-numbering
     return mergePngFrameDirs(chunkPaths, outputPath, plan.totalFrames, audioPath, start);
+  }
+
+  if (chunksAreStitchedMp4(planDir, cfr)) {
+    await writeStitchedMp4(chunkPaths, outputPath);
+    return {
+      outputPath,
+      durationMs: Date.now() - start,
+      framesEncoded: plan.totalFrames,
+      fileSize: statSync(outputPath).size,
+    };
   }
 
   // ── 2b. mp4 / mov / webm: join + audio mux + faststart in one pass ─────
@@ -377,6 +388,24 @@ async function runAssembleFfmpeg(
       failureReason: result.failureReason,
     });
   }
+}
+
+/** Chunks that carry their audio are stitched under one index, the same bytes as the S3 stitch. */
+export function chunksAreStitchedMp4(planDir: string, cfr: boolean): boolean {
+  if (!chunksCarryAudio(planDir)) return false;
+  if (cfr) {
+    throw new Error("[assemble] cfr=true cannot re-encode a plan whose mp4 chunks carry audio");
+  }
+  return true;
+}
+
+function chunksCarryAudio(planDir: string): boolean {
+  const encoderJsonPath = join(planDir, "meta", "encoder.json");
+  if (!existsSync(encoderJsonPath)) return false;
+  return (
+    (JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as LockedRenderConfig).chunksCarryAudio ===
+    true
+  );
 }
 
 /**

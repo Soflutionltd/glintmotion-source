@@ -16,6 +16,7 @@ import { parseOutputResolutionFlag } from "../utils/parseOutputResolution.js";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
 import { defaultCloudFps } from "../utils/compositionFps.js";
+import { isMissingPackageError, missingPackageMessage } from "../utils/missingPackage.js";
 
 export const examples: Example[] = [
   ["Deploy the Lambda render stack to AWS", "hyperframes lambda deploy"],
@@ -109,7 +110,11 @@ export default defineCommand({
     profile: { type: "string", description: "AWS profile name (default: AWS_PROFILE env)" },
 
     // deploy
-    concurrency: { type: "string", description: "Lambda reserved concurrency (default: 8)" },
+    concurrency: {
+      type: "string",
+      description:
+        "Lambda reserved concurrency, or none to remove it (default: keep the stack's; a new stack reserves none and each render runs up to 90% of the account's unreserved concurrency)",
+    },
     "chrome-source": {
       type: "string",
       description: "sparticuz | chrome-headless-shell (default: sparticuz)",
@@ -239,13 +244,9 @@ export default defineCommand({
       try {
         await import("@hyperframes/aws-lambda/sdk");
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") {
+        if (isMissingPackageError(err, "@hyperframes/aws-lambda")) {
           console.error(
-            `${c.error("@hyperframes/aws-lambda is not installed.")} The ${c.accent(`hyperframes lambda ${subcommand}`)} command needs it at runtime.\n` +
-              `Install it alongside the CLI:\n` +
-              `  ${c.accent("npm install -g @hyperframes/aws-lambda")}\n` +
-              `Or, for an opt-in dev setup:\n` +
-              `  ${c.accent("npm install @hyperframes/aws-lambda")}`,
+            missingPackageMessage("@hyperframes/aws-lambda", `hyperframes lambda ${subcommand}`),
           );
           failCommand();
         }
@@ -256,11 +257,12 @@ export default defineCommand({
     switch (subcommand) {
       case "deploy": {
         const { runDeploy } = await import("./lambda/deploy.js");
+        const { parseReservedConcurrency } = await import("./lambda/sam.js");
         await runDeploy({
           stackName,
           region: args.region as string | undefined,
           awsProfile: args.profile as string | undefined,
-          reservedConcurrency: parsePositiveInt(args.concurrency, "--concurrency"),
+          reservedConcurrency: parseReservedConcurrency(args.concurrency),
           chromeSource: parseChromeSource(args["chrome-source"]),
           lambdaMemoryMb: parsePositiveInt(args.memory, "--memory"),
           skipBuild: Boolean(args["skip-build"]),

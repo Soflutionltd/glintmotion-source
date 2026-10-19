@@ -5,6 +5,7 @@ import {
   HF_COLOR_GRADING_CANVAS_ID_PREFIX,
   HF_COLOR_GRADING_DETAIL_KEYS,
   HF_COLOR_GRADING_EFFECT_KEYS,
+  HF_COLOR_GRADING_SOURCE_TAGS,
   hasHfColorGradingHueCurveValues,
   hasHfColorGradingRgbCurveValues,
   hasHfColorGradingSecondaryValues,
@@ -42,9 +43,15 @@ import { copyMediaVisualStyles } from "../inline-scripts/parityContract";
 import { readVariablesForElement } from "./variableScope";
 import { swallow } from "./diagnostics";
 import { findInjectedRenderFrame } from "./renderFrameSibling";
-import { isElementNode, isHtmlElement, isImageElement, isVideoElement } from "./domRealm";
+import {
+  isCanvasElement,
+  isElementNode,
+  isHtmlElement,
+  isImageElement,
+  isVideoElement,
+} from "./domRealm";
 
-type ColorGradingMediaElement = HTMLVideoElement | HTMLImageElement;
+type ColorGradingMediaElement = HTMLVideoElement | HTMLImageElement | HTMLCanvasElement;
 
 type EntrySource = "attribute" | "live";
 
@@ -192,6 +199,7 @@ interface EffectRenderState {
 
 interface ColorGradingRenderer extends EffectRenderState {
   canvas: HTMLCanvasElement;
+  glCanvas: HTMLCanvasElement;
 }
 
 interface ColorGradingEntry extends ColorGradingRenderer {
@@ -1461,8 +1469,15 @@ const KUWAHARA_RESOLVE_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
+const COLOR_GRADING_SOURCE_SELECTOR = HF_COLOR_GRADING_SOURCE_TAGS.map(
+  (tag) => `${tag}[${HF_COLOR_GRADING_ATTR}]`,
+).join(", ");
+
 function isColorGradingMediaElement(value: Element): value is ColorGradingMediaElement {
-  return isVideoElement(value) || isImageElement(value);
+  return (
+    isHtmlElement(value) &&
+    (HF_COLOR_GRADING_SOURCE_TAGS as readonly string[]).includes(value.localName)
+  );
 }
 
 function isVisibleForColorGrading(element: ColorGradingMediaElement): boolean {
@@ -1657,6 +1672,11 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
     premultipliedAlpha: false,
   });
   if (!gl) return null;
+  const program = createProgramResources(gl);
+  return program ? { gl, program } : null;
+}
+
+function createProgramResources(gl: WebGLRenderingContext): ProgramInfo | null {
   const program = createProgram(gl);
   const texture = createTexture(gl);
   const lutTexture = createTexture(gl, gl.NEAREST);
@@ -1674,57 +1694,54 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
   return {
-    gl,
-    program: {
-      program,
-      texture,
-      lutTexture,
-      advancedTexture,
-      advancedSignature: null,
-      quad,
-      position: gl.getAttribLocation(program, "a_pos"),
-      source: gl.getUniformLocation(program, "u_source"),
-      blurSource: gl.getUniformLocation(program, "u_blurSource"),
-      bloomSource: gl.getUniformLocation(program, "u_bloomSource"),
-      kuwaharaSource: gl.getUniformLocation(program, "u_kuwaharaSource"),
-      lut: gl.getUniformLocation(program, "u_lut"),
-      advanced: gl.getUniformLocation(program, "u_advanced"),
-      resolution: gl.getUniformLocation(program, "u_resolution"),
-      uvScale: gl.getUniformLocation(program, "u_uvScale"),
-      uvOffset: gl.getUniformLocation(program, "u_uvOffset"),
-      blurReady: gl.getUniformLocation(program, "u_blurReady"),
-      bloomReady: gl.getUniformLocation(program, "u_bloomReady"),
-      kuwaharaReady: gl.getUniformLocation(program, "u_kuwaharaReady"),
-      lutEnabled: gl.getUniformLocation(program, "u_lutEnabled"),
-      lutSize: gl.getUniformLocation(program, "u_lutSize"),
-      lutTextureSize: gl.getUniformLocation(program, "u_lutTextureSize"),
-      lutDomainMin: gl.getUniformLocation(program, "u_lutDomainMin"),
-      lutDomainMax: gl.getUniformLocation(program, "u_lutDomainMax"),
-      lutIntensity: gl.getUniformLocation(program, "u_lutIntensity"),
-      shadowWheel: gl.getUniformLocation(program, "u_shadowWheel"),
-      midtoneWheel: gl.getUniformLocation(program, "u_midtoneWheel"),
-      highlightWheel: gl.getUniformLocation(program, "u_highlightWheel"),
-      rgbCurvesEnabled: gl.getUniformLocation(program, "u_rgbCurvesEnabled"),
-      hueCurvesEnabled: gl.getUniformLocation(program, "u_hueCurvesEnabled"),
-      secondaryCount: gl.getUniformLocation(program, "u_secondaryCount"),
-      adjustUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_ADJUST_KEYS),
-      detailUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_DETAIL_KEYS),
-      effectUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_EFFECT_KEYS),
-      grainSeed: gl.getUniformLocation(program, "u_grainSeed"),
-      effectTime: gl.getUniformLocation(program, "u_effectTime"),
-      paletteSize: gl.getUniformLocation(program, "u_paletteSize"),
-      palette0: gl.getUniformLocation(program, "u_palette0"),
-      palette1: gl.getUniformLocation(program, "u_palette1"),
-      palette2: gl.getUniformLocation(program, "u_palette2"),
-      palette3: gl.getUniformLocation(program, "u_palette3"),
-      palette4: gl.getUniformLocation(program, "u_palette4"),
-      palette5: gl.getUniformLocation(program, "u_palette5"),
-      intensity: gl.getUniformLocation(program, "u_intensity"),
-      compareEnabled: gl.getUniformLocation(program, "u_compareEnabled"),
-      comparePosition: gl.getUniformLocation(program, "u_comparePosition"),
-      compareSoftness: gl.getUniformLocation(program, "u_compareSoftness"),
-      compareLineWidth: gl.getUniformLocation(program, "u_compareLineWidth"),
-    },
+    program,
+    texture,
+    lutTexture,
+    advancedTexture,
+    advancedSignature: null,
+    quad,
+    position: gl.getAttribLocation(program, "a_pos"),
+    source: gl.getUniformLocation(program, "u_source"),
+    blurSource: gl.getUniformLocation(program, "u_blurSource"),
+    bloomSource: gl.getUniformLocation(program, "u_bloomSource"),
+    kuwaharaSource: gl.getUniformLocation(program, "u_kuwaharaSource"),
+    lut: gl.getUniformLocation(program, "u_lut"),
+    advanced: gl.getUniformLocation(program, "u_advanced"),
+    resolution: gl.getUniformLocation(program, "u_resolution"),
+    uvScale: gl.getUniformLocation(program, "u_uvScale"),
+    uvOffset: gl.getUniformLocation(program, "u_uvOffset"),
+    blurReady: gl.getUniformLocation(program, "u_blurReady"),
+    bloomReady: gl.getUniformLocation(program, "u_bloomReady"),
+    kuwaharaReady: gl.getUniformLocation(program, "u_kuwaharaReady"),
+    lutEnabled: gl.getUniformLocation(program, "u_lutEnabled"),
+    lutSize: gl.getUniformLocation(program, "u_lutSize"),
+    lutTextureSize: gl.getUniformLocation(program, "u_lutTextureSize"),
+    lutDomainMin: gl.getUniformLocation(program, "u_lutDomainMin"),
+    lutDomainMax: gl.getUniformLocation(program, "u_lutDomainMax"),
+    lutIntensity: gl.getUniformLocation(program, "u_lutIntensity"),
+    shadowWheel: gl.getUniformLocation(program, "u_shadowWheel"),
+    midtoneWheel: gl.getUniformLocation(program, "u_midtoneWheel"),
+    highlightWheel: gl.getUniformLocation(program, "u_highlightWheel"),
+    rgbCurvesEnabled: gl.getUniformLocation(program, "u_rgbCurvesEnabled"),
+    hueCurvesEnabled: gl.getUniformLocation(program, "u_hueCurvesEnabled"),
+    secondaryCount: gl.getUniformLocation(program, "u_secondaryCount"),
+    adjustUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_ADJUST_KEYS),
+    detailUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_DETAIL_KEYS),
+    effectUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_EFFECT_KEYS),
+    grainSeed: gl.getUniformLocation(program, "u_grainSeed"),
+    effectTime: gl.getUniformLocation(program, "u_effectTime"),
+    paletteSize: gl.getUniformLocation(program, "u_paletteSize"),
+    palette0: gl.getUniformLocation(program, "u_palette0"),
+    palette1: gl.getUniformLocation(program, "u_palette1"),
+    palette2: gl.getUniformLocation(program, "u_palette2"),
+    palette3: gl.getUniformLocation(program, "u_palette3"),
+    palette4: gl.getUniformLocation(program, "u_palette4"),
+    palette5: gl.getUniformLocation(program, "u_palette5"),
+    intensity: gl.getUniformLocation(program, "u_intensity"),
+    compareEnabled: gl.getUniformLocation(program, "u_compareEnabled"),
+    comparePosition: gl.getUniformLocation(program, "u_comparePosition"),
+    compareSoftness: gl.getUniformLocation(program, "u_compareSoftness"),
+    compareLineWidth: gl.getUniformLocation(program, "u_compareLineWidth"),
   };
 }
 
@@ -1778,7 +1795,7 @@ function hashStringSeed(value: string): number {
 function seedForElement(element: ColorGradingMediaElement): number {
   const key =
     element.id ||
-    element.currentSrc ||
+    (!isCanvasElement(element) && element.currentSrc) ||
     element.getAttribute("src") ||
     `${element.tagName}:${Array.prototype.indexOf.call(element.parentNode?.children ?? [], element)}`;
   return hashStringSeed(key);
@@ -1936,11 +1953,10 @@ function destroyMainProgramResources(gl: WebGLRenderingContext, program: Program
 }
 
 function replaceProgramResources(entry: ColorGradingEntry): boolean {
-  const created = createProgramInfo(entry.canvas);
-  if (!created) return false;
+  const program = createProgramResources(entry.gl);
+  if (!program) return false;
   destroyProgramResources(entry);
-  entry.gl = created.gl;
-  entry.program = created.program;
+  entry.program = program;
   entry.lut = null;
   entry.lutLoadingSrc = null;
   entry.lutError = null;
@@ -2460,31 +2476,22 @@ function resolveTarget(
 }
 
 function readSourceSize(source: TexImageSource): { width: number; height: number } | null {
-  if (isVideoElement(source)) {
-    return source.videoWidth > 0 && source.videoHeight > 0
-      ? { width: source.videoWidth, height: source.videoHeight }
-      : null;
-  }
-  if (isImageElement(source)) {
-    return source.naturalWidth > 0 && source.naturalHeight > 0
-      ? { width: source.naturalWidth, height: source.naturalHeight }
-      : null;
-  }
-  return null;
+  const [width, height] = isVideoElement(source)
+    ? [source.videoWidth, source.videoHeight]
+    : isImageElement(source)
+      ? [source.naturalWidth, source.naturalHeight]
+      : isCanvasElement(source)
+        ? [source.width, source.height]
+        : [0, 0];
+  return width > 0 && height > 0 ? { width, height } : null;
 }
 
 function isDrawableSource(source: TexImageSource): boolean {
-  if (isVideoElement(source)) {
-    return (
-      source.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      source.videoWidth > 0 &&
-      source.videoHeight > 0
-    );
+  if (isVideoElement(source) && source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return false;
   }
-  if (isImageElement(source)) {
-    return source.complete && source.naturalWidth > 0 && source.naturalHeight > 0;
-  }
-  return false;
+  if (isImageElement(source) && !source.complete) return false;
+  return readSourceSize(source) !== null;
 }
 
 function findRenderFrameImage(video: HTMLVideoElement): HTMLImageElement | null {
@@ -3100,24 +3107,76 @@ function bindProgramTextures(
 }
 
 // fallow-ignore-next-line complexity
-function drawEntry(entry: ColorGradingEntry): boolean {
-  if (entry.destroyed || entry.contextLost) return false;
+function fitSharedCanvas(entry: ColorGradingEntry, size: { width: number; height: number }): void {
+  if (entry.glCanvas === entry.canvas) return;
+  if (entry.glCanvas.width < size.width) entry.glCanvas.width = size.width;
+  if (entry.glCanvas.height < size.height) entry.glCanvas.height = size.height;
+}
+
+function presentEntry(entry: ColorGradingEntry, size: { width: number; height: number }): void {
+  if (entry.glCanvas === entry.canvas) return;
+  const context = entry.canvas.getContext("2d");
+  if (!context) throw new Error("Canvas 2D is unavailable");
+  const { width, height } = size;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(
+    entry.glCanvas,
+    0,
+    entry.glCanvas.height - height,
+    width,
+    height,
+    0,
+    0,
+    width,
+    height,
+  );
+}
+
+type DrawableFrame = {
+  source: TexImageSource;
+  pixels: NonNullable<ReturnType<typeof readablePixels>>;
+  size: { width: number; height: number };
+};
+
+function drawableFrame(entry: ColorGradingEntry): DrawableFrame | null {
   const source = getDrawableSource(entry.element);
   const pixels = source && readablePixels(source, entry);
   if (!source || !pixels) {
     if (!entry.hasDrawn) entry.canvas.style.display = "none";
-    return false;
+    return null;
   }
-  const sourceSize = readSourceSize(source);
-  if (!sourceSize) return false;
-  const styleSource = isHtmlElement(source) ? source : entry.element;
-  const sourceOpacity = entry.element.style.getPropertyValue("opacity");
-  const sourceOpacityPriority = entry.element.style.getPropertyPriority("opacity");
-  const hiddenByColorGrading =
-    entry.sourceHidden && sourceOpacity === "0" && sourceOpacityPriority === "important";
+  const size = readSourceSize(source);
+  return size ? { source, pixels, size } : null;
+}
+
+function restoreAuthoredOpacity(entry: ColorGradingEntry): void {
+  if (entry.sourceInlineOpacity === null) {
+    entry.element.style.removeProperty("opacity");
+    return;
+  }
+  entry.element.style.setProperty(
+    "opacity",
+    entry.sourceInlineOpacity,
+    entry.sourceInlineOpacityPriority || "",
+  );
+}
+
+function isHiddenByColorGrading(entry: ColorGradingEntry): boolean {
+  const { style } = entry.element;
+  return (
+    entry.sourceHidden &&
+    style.getPropertyValue("opacity") === "0" &&
+    style.getPropertyPriority("opacity") === "important"
+  );
+}
+
+function syncSourceAppearance(
+  entry: ColorGradingEntry,
+  source: TexImageSource,
+  injectedFrameSource: boolean,
+): void {
+  const hiddenByColorGrading = isHiddenByColorGrading(entry);
   const sourceVisibility = entry.element.style.getPropertyValue("visibility");
-  const injectedFrameSource = isRenderFrameImage(source);
-  if (injectedFrameSource) keepCanvasAboveSource(entry, source);
   // When color grading hid the source (opacity:0 !important), temporarily
   // restore the authored inline opacity so getComputedStyle reflects the CSS
   // animation's current value instead of our own hide. Without this, a CSS
@@ -3125,29 +3184,79 @@ function drawEntry(entry: ColorGradingEntry): boolean {
   // the entire render because the !important blocks all animation effects on
   // the property (#3329). The restore–read–rehide is synchronous, so no
   // repaint occurs between the style writes.
-  if (hiddenByColorGrading && !injectedFrameSource) {
-    if (entry.sourceInlineOpacity !== null) {
-      entry.element.style.setProperty(
-        "opacity",
-        entry.sourceInlineOpacity,
-        entry.sourceInlineOpacityPriority || "",
-      );
-    } else {
-      entry.element.style.removeProperty("opacity");
-    }
-  }
-  const computed = window.getComputedStyle(injectedFrameSource ? source : entry.element);
+  const restoresOpacity = hiddenByColorGrading && !injectedFrameSource;
+  if (restoresOpacity) restoreAuthoredOpacity(entry);
+  const computed = window.getComputedStyle(
+    injectedFrameSource ? (source as HTMLImageElement) : entry.element,
+  );
   // Grading never writes `visibility`, so the source's computed visibility
   // always tracks the clip window and has to be re-read every frame.
   entry.sourceOpacityForCanvas = computed.opacity || "1";
-  if (hiddenByColorGrading && !injectedFrameSource) {
-    entry.element.style.setProperty("opacity", "0", "important");
-  }
+  if (restoresOpacity) entry.element.style.setProperty("opacity", "0", "important");
   entry.sourceVisibleForCanvas =
     (injectedFrameSource || sourceVisibility !== "hidden") && computed.visibility !== "hidden";
-  const layout = updateCanvasLayout(entry, styleSource);
-  if (!layout) return false;
+}
 
+function canonicalFrameTime(element: ColorGradingMediaElement): number {
+  const runtimeTime = (window as WindowWithColorGrading).__player?.getTime?.();
+  if (typeof runtimeTime === "number" && Number.isFinite(runtimeTime))
+    return Math.max(0, runtimeTime);
+  return isVideoElement(element) ? Math.max(0, element.currentTime) : 0;
+}
+
+function renderGradedFrame(
+  entry: ColorGradingEntry,
+  pixels: DrawableFrame["pixels"],
+  layout: { width: number; height: number },
+  uv: ReturnType<typeof calculateObjectFitUv>,
+): void {
+  const { gl, program } = entry;
+  fitSharedCanvas(entry, layout);
+  const grading = readAnimatedGrading(entry);
+  const lut = ensureEntryLut(entry);
+  // Browser media elements are top-left oriented; WebGL texture coordinates
+  // are bottom-left oriented unless the upload is flipped.
+  uploadSourceTexture(gl, program.texture, pixels);
+  const hasAnimatedKuwahara = readAnimatedValue(entry.element, ANIMATED_KUWAHARA_PROPERTY) !== null;
+  const prepared = prepareEffectTextures(entry, grading, layout, uv, {
+    preserveKuwahara: hasAnimatedKuwahara,
+  });
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, layout.width, layout.height);
+  gl.useProgram(program.program);
+  bindProgramTextures(gl, program, prepared);
+  const frameTime = canonicalFrameTime(entry.element);
+  const grainSeed = entry.grainSeed + Math.floor(frameTime * 60);
+  applyUniforms(
+    gl,
+    program,
+    grading,
+    lut,
+    prepared.blurReady,
+    prepared.bloomReady,
+    prepared.kuwaharaReady,
+    entry.compare,
+    layout,
+    uv,
+    grainSeed,
+    frameTime,
+  );
+  drawFullscreenQuad(gl, program);
+  presentEntry(entry, layout);
+}
+
+function placeCanvas(
+  entry: ColorGradingEntry,
+  source: TexImageSource,
+  sourceSize: { width: number; height: number },
+): {
+  layout: { width: number; height: number };
+  uv: ReturnType<typeof calculateObjectFitUv>;
+} | null {
+  const styleSource = isHtmlElement(source) ? source : entry.element;
+  const layout = updateCanvasLayout(entry, styleSource);
+  if (!layout) return null;
   const style = window.getComputedStyle(styleSource);
   const uv = calculateObjectFitUv(
     layout.width,
@@ -3157,46 +3266,22 @@ function drawEntry(entry: ColorGradingEntry): boolean {
     style.objectFit,
     style.objectPosition,
   );
-  const { gl, program } = entry;
-  try {
-    const grading = readAnimatedGrading(entry);
-    const lut = ensureEntryLut(entry);
-    // Browser media elements are top-left oriented; WebGL texture coordinates
-    // are bottom-left oriented unless the upload is flipped.
-    uploadSourceTexture(gl, program.texture, pixels);
-    const hasAnimatedKuwahara =
-      readAnimatedValue(entry.element, ANIMATED_KUWAHARA_PROPERTY) !== null;
-    const prepared = prepareEffectTextures(entry, grading, layout, uv, {
-      preserveKuwahara: hasAnimatedKuwahara,
-    });
+  return { layout, uv };
+}
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, layout.width, layout.height);
-    gl.useProgram(program.program);
-    bindProgramTextures(gl, program, prepared);
-    const runtimeTime = (window as WindowWithColorGrading).__player?.getTime?.();
-    const frameTime =
-      typeof runtimeTime === "number" && Number.isFinite(runtimeTime)
-        ? Math.max(0, runtimeTime)
-        : isVideoElement(entry.element)
-          ? Math.max(0, entry.element.currentTime)
-          : 0;
-    const grainSeed = entry.grainSeed + Math.floor(frameTime * 60);
-    applyUniforms(
-      gl,
-      program,
-      grading,
-      lut,
-      prepared.blurReady,
-      prepared.bloomReady,
-      prepared.kuwaharaReady,
-      entry.compare,
-      layout,
-      uv,
-      grainSeed,
-      frameTime,
-    );
-    drawFullscreenQuad(gl, program);
+function drawEntry(entry: ColorGradingEntry): boolean {
+  if (entry.destroyed || entry.contextLost) return false;
+  const frame = drawableFrame(entry);
+  if (!frame) return false;
+  const { source, pixels, size: sourceSize } = frame;
+  const injectedFrameSource = isRenderFrameImage(source);
+  if (injectedFrameSource) keepCanvasAboveSource(entry, source);
+  syncSourceAppearance(entry, source, injectedFrameSource);
+  const placed = placeCanvas(entry, source, sourceSize);
+  if (!placed) return false;
+  const { layout, uv } = placed;
+  try {
+    renderGradedFrame(entry, pixels, layout, uv);
     hideSourceElement(entry);
     if (injectedFrameSource) hideFrameBorder(entry, source);
     entry.hasDrawn = true;
@@ -3231,6 +3316,7 @@ function createPreviewRenderer(): ColorGradingPreviewRenderer | null {
   return created
     ? {
         canvas,
+        glCanvas: canvas,
         ...created,
         lut: null,
         effectTargets: null,
@@ -3387,6 +3473,14 @@ function addListener(
   entry.cleanup.push(() => target.removeEventListener(type, listener));
 }
 
+function redrawsOnTransportTick(element: ColorGradingMediaElement): boolean {
+  if (isCanvasElement(element)) return true;
+  if (isVideoElement(element) && !element.paused && !element.ended) return false;
+  return ANIMATED_GRADING_PROPERTIES.some(
+    (property) => readAnimatedValue(element, property) !== null,
+  );
+}
+
 function cancelScheduledFrame(entry: ColorGradingEntry): void {
   if (entry.animationFrame !== null) {
     window.cancelAnimationFrame(entry.animationFrame);
@@ -3433,24 +3527,6 @@ function installEntryListeners(entry: ColorGradingEntry): void {
     addListener(entry, entry.element, "play", () => scheduleVideoDraw(entry));
     addListener(entry, entry.element, "pause", redraw);
   }
-  addListener(entry, entry.canvas, "webglcontextlost", (event) => {
-    event.preventDefault();
-    entry.contextLost = true;
-    entry.drawError = "WebGL context lost";
-    entry.canvas.style.display = "none";
-    restoreSourceElement(entry);
-  });
-  addListener(entry, entry.canvas, "webglcontextrestored", () => {
-    entry.contextLost = false;
-    if (!replaceProgramResources(entry)) {
-      entry.contextLost = true;
-      entry.drawError = "WebGL context restore failed";
-      restoreSourceElement(entry);
-      return;
-    }
-    entry.drawError = null;
-    drawEntry(entry);
-  });
   if (typeof ResizeObserver !== "undefined") {
     entry.resizeObserver = new ResizeObserver(redraw);
     entry.resizeObserver.observe(entry.element);
@@ -3503,6 +3579,7 @@ function detachEntry(entry: ColorGradingEntry): ColorGradingRenderer | null {
   }
   return {
     canvas: entry.canvas,
+    glCanvas: entry.glCanvas,
     gl: entry.gl,
     program: entry.program,
     effectTargets: null,
@@ -3548,6 +3625,51 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   let previewRenderer: ColorGradingPreviewRenderer | null = null;
   let previewQueue = Promise.resolve();
   let destroyed = false;
+  let shared: { canvas: HTMLCanvasElement; gl: WebGLRenderingContext } | null = null;
+  const trackedEntries = () =>
+    [...trackedElements].flatMap((element) => entries.get(element) ?? []);
+
+  const sharedContext = () => {
+    if (shared) return shared;
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false });
+    if (!gl) return null;
+    canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      idleRenderers.length = 0;
+      for (const entry of trackedEntries()) {
+        entry.contextLost = true;
+        entry.drawError = "WebGL context lost";
+        entry.canvas.style.display = "none";
+        restoreSourceElement(entry);
+      }
+    });
+    canvas.addEventListener("webglcontextrestored", () => {
+      for (const entry of trackedEntries()) {
+        entry.contextLost = !replaceProgramResources(entry);
+        entry.drawError = entry.contextLost ? "WebGL context restore failed" : null;
+        if (entry.contextLost) restoreSourceElement(entry);
+        else drawEntry(entry);
+      }
+    });
+    shared = { canvas, gl };
+    return shared;
+  };
+
+  const newRenderer = (element: ColorGradingMediaElement): ColorGradingRenderer | null => {
+    const context = sharedContext();
+    const program = context && createProgramResources(context.gl);
+    if (!context || !program) return null;
+    return {
+      canvas: makeCanvas(element),
+      glCanvas: context.canvas,
+      gl: context.gl,
+      program,
+      effectTargets: null,
+      kuwaharaTargets: null,
+      effectError: null,
+    };
+  };
 
   const upsert = (
     element: ColorGradingMediaElement,
@@ -3566,20 +3688,9 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     if (renderer) {
       attachCanvas(renderer.canvas, element);
     } else {
-      const canvas = makeCanvas(element);
-      const created = createProgramInfo(canvas);
-      if (!created) {
-        canvas.remove();
-        return false;
-      }
-      renderer = {
-        canvas,
-        gl: created.gl,
-        program: created.program,
-        effectTargets: null,
-        kuwaharaTargets: null,
-        effectError: null,
-      };
+      const created = newRenderer(element);
+      if (!created) return false;
+      renderer = created;
     }
     const entry: ColorGradingEntry = {
       element,
@@ -3649,7 +3760,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     const renderer = detachEntry(entry);
     if (renderer) {
       if (entry.contextLost || idleRenderers.length >= MAX_IDLE_COLOR_GRADING_RENDERERS) {
-        destroyProgramResources(renderer, true);
+        destroyProgramResources(renderer);
       } else {
         idleRenderers.push(renderer);
       }
@@ -3661,9 +3772,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   const refresh = (): number => {
     if (destroyed) return 0;
     const attributeElements = new Set<ColorGradingMediaElement>();
-    const nodes = document.querySelectorAll(
-      `video[${HF_COLOR_GRADING_ATTR}], img[${HF_COLOR_GRADING_ATTR}]`,
-    );
+    const nodes = document.querySelectorAll(COLOR_GRADING_SOURCE_SELECTOR);
     nodes.forEach((node) => {
       if (!isColorGradingMediaElement(node)) return;
       attributeElements.add(node);
@@ -3723,12 +3832,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     for (const element of trackedElements) {
       const entry = entries.get(element);
       if (!entry) continue;
-      const hasAnimatedProperty = ANIMATED_GRADING_PROPERTIES.some(
-        (property) => readAnimatedValue(element, property) !== null,
-      );
-      if (!hasAnimatedProperty) continue;
-      if (isVideoElement(element) && !element.paused && !element.ended) continue;
-      if (drawEntry(entry)) drawn += 1;
+      if (redrawsOnTransportTick(element) && drawEntry(entry)) drawn += 1;
     }
     return drawn;
   };
@@ -3864,8 +3968,10 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     observer?.disconnect();
     observer = null;
     for (const element of trackedElements) removeElement(element);
-    for (const renderer of idleRenderers) destroyProgramResources(renderer, true);
+    for (const renderer of idleRenderers) destroyProgramResources(renderer);
     idleRenderers.length = 0;
+    shared?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    shared = null;
     if (previewRenderer) {
       destroyProgramResources(previewRenderer, true);
       previewRenderer = null;

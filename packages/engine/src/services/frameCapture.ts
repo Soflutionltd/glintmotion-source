@@ -236,6 +236,7 @@ export interface CaptureSession {
   beginFrameIntervalMs: number;
   beginFrameHasDamageCount: number;
   beginFrameNoDamageCount: number;
+  beginFrameSeekPresented?: boolean;
   /** Optional producer config — when set, overrides module-level env var constants. */
   config?: Partial<EngineConfig>;
   /** True if running on SwiftShader (detected at init). Undefined before init. */
@@ -2217,6 +2218,33 @@ async function decodeAllImages(page: Page): Promise<void> {
   });
 }
 
+/** Out-of-band videos a poster now sizes, so dropping their media cannot move layout. */
+export function releasableVideoIds(options: CaptureOptions): string[] {
+  const hinted = new Set((options.videoMetadataHints ?? []).map((hint) => hint.id));
+  return (options.skipReadinessVideoIds ?? []).filter((id) => hinted.has(id));
+}
+
+/** FFmpeg supplies these videos' frames, so their own players would only hold decoders and buffers in every worker. */
+export async function releaseInjectedVideoMedia(
+  page: Page,
+  videoIds: readonly string[],
+): Promise<void> {
+  if (videoIds.length === 0) return;
+  await page.evaluate(
+    (ids: string[]) => {
+      for (const id of ids) {
+        const video = window.__hfMediaEl?.(id) ?? document.getElementById(id);
+        if (!(video instanceof HTMLVideoElement)) continue;
+        video.pause();
+        for (const source of video.querySelectorAll("source")) source.remove();
+        video.removeAttribute("src");
+        video.load();
+      }
+    },
+    [...videoIds],
+  );
+}
+
 export async function applyVideoMetadataHints(
   page: Page,
   hints: readonly CaptureVideoMetadataHint[] | undefined,
@@ -2505,6 +2533,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     recordSubTimelineWarning(session, pageReadyTimeout);
 
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
     logInitPhase("applyVideoMetadataHints complete");
 
     // Run independent readiness checks in parallel — videos, images, fonts,
@@ -2661,6 +2690,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     recordSubTimelineWarning(session, pageReadyTimeout);
 
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
     logInitPhase("applyVideoMetadataHints complete");
 
     // Run independent readiness checks in parallel — videos, images, fonts,
@@ -3455,6 +3485,7 @@ export async function createStaticVerificationPage(session: CaptureSession): Pro
       knownUnregisteredIds: session.subTimelineWaitMemo.unregisteredIds,
     });
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
 
     const skipVideoIds = session.options.skipReadinessVideoIds ?? [];
     await Promise.all([
@@ -3995,6 +4026,17 @@ async function captureFrameSurface(
 
   if (session.captureMode === "beginframe") {
     const frameTimeTicks = session.beginFrameTimeTicks + frameIndex * session.beginFrameIntervalMs;
+    if (!session.beginFrameSeekPresented) {
+      // A session's first capture can return the frame composited during init instead of
+      // this seek, so display the seek once at a tick between the probe and this capture.
+      const client = await getCdpSession(page);
+      await client.send("HeadlessExperimental.beginFrame", {
+        frameTimeTicks: frameTimeTicks - session.beginFrameIntervalMs / 2,
+        interval: session.beginFrameIntervalMs,
+        noDisplayUpdates: false,
+      });
+      session.beginFrameSeekPresented = true;
+    }
     const result = await beginFrameCapture(
       page,
       options,

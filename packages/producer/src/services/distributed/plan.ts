@@ -54,6 +54,8 @@ import {
   type RenderStrictness,
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
+import { constrainAacTruePeak } from "../render/audioPadTrim.js";
+import { encoderFailureError } from "../render/encoderInterruption.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
 import {
@@ -305,6 +307,11 @@ export interface BuildLocalExecutionPlanOptions {
   readonly digests?: PlanFileDigests;
   /** Runs while the audio mixes, once `compiled/` and the video trees are final. */
   readonly whileAudioMixes?: () => Promise<void>;
+  /**
+   * mp4 chunks carry their own slice of the plan audio (renderChunk muxes it). Ignored for other
+   * formats and with `cfr`, which re-encodes.
+   */
+  readonly chunksCarryAudio?: boolean;
 }
 
 export function logPlanStage(log: ProducerLogger, stage: string, startedAt: number): void {
@@ -437,8 +444,8 @@ export class ChunkExceedsWorkerTimeoutError extends Error {
 }
 
 /**
- * The `maxParallelChunks` a plan uses: explicit chunking flags win; otherwise one wave across
- * `workerConcurrency`, widened so each chunk fits `workerTimeoutSeconds`; with neither, 16.
+ * The `maxParallelChunks` a plan uses: an explicit value, else one wave across `workerConcurrency`
+ * (16 if unknown), widened to fit `workerTimeoutSeconds` unless chunkSize/targetChunkFrames pin it.
  */
 export function resolveMaxParallelChunks(
   config: Pick<
@@ -456,15 +463,15 @@ export function resolveMaxParallelChunks(
 ): number {
   if (config.maxParallelChunks !== undefined) return config.maxParallelChunks;
   const { workerTimeoutSeconds, workerConcurrency } = config;
-  const pinsChunking = config.chunkSize !== undefined || config.targetChunkFrames !== undefined;
-  if (pinsChunking || (workerTimeoutSeconds === undefined && workerConcurrency === undefined)) {
-    return DEFAULT_MAX_PARALLEL_CHUNKS;
-  }
-  const secondsPerFrame = ESTIMATED_SECONDS_PER_MEGAPIXEL_FRAME * megapixels;
   const wave = Math.min(
     workerConcurrency ?? DEFAULT_MAX_PARALLEL_CHUNKS,
     MAX_PARALLEL_CHUNKS_CEILING,
   );
+  const pinsChunking = config.chunkSize !== undefined || config.targetChunkFrames !== undefined;
+  if (pinsChunking || (workerTimeoutSeconds === undefined && workerConcurrency === undefined)) {
+    return wave;
+  }
+  const secondsPerFrame = ESTIMATED_SECONDS_PER_MEGAPIXEL_FRAME * megapixels;
   const minFramesPerChunk = Math.ceil(ESTIMATED_CHUNK_OVERHEAD_SECONDS / secondsPerFrame);
   const wide = Math.max(1, Math.min(wave, Math.floor(totalFrames / minFramesPerChunk)));
   if (workerTimeoutSeconds === undefined) return wide;
@@ -486,7 +493,7 @@ export function resolveMaxParallelChunks(
       `[plan] ${needed} chunks are needed to keep each under the ${workerTimeoutSeconds} s ` +
         `worker time limit, but the plan assumes ${wave} workers at once, so the render runs ` +
         `in ${Math.ceil(needed / wave)} waves. Raise --concurrency to ${needed} to render in one ` +
-        `wave (Lambda: hyperframes lambda deploy --concurrency ${needed}).`,
+        `wave (Lambda: hyperframes lambda deploy --concurrency ${needed}, or a higher account concurrency quota).`,
       { needed, workerConcurrency: wave, workerTimeoutSeconds },
     );
   }
@@ -826,6 +833,7 @@ function buildLockedRenderConfig(input: {
   effectiveChunkSize: number;
   chunkCount: number;
   runtimeEnv: Record<string, string>;
+  chunksCarryAudio: boolean;
 }): LockedRenderConfig {
   const { config, forceScreenshot, deviceScaleFactor, ffmpegVersion } = input;
   const { encoder, pixelFormat, preset } = resolveEncoderTriple(config);
@@ -860,7 +868,16 @@ function buildLockedRenderConfig(input: {
     chunkCount: input.chunkCount,
     runtimeEnv: input.runtimeEnv,
     variables: config.variables,
+    ...(input.chunksCarryAudio ? { chunksCarryAudio: true } : {}),
   };
+}
+
+/** Only mp4 without `cfr` can skip the assemble-time join; `cfr` re-encodes the joined video. */
+function carriesChunkAudio(
+  config: Pick<DistributedRenderConfig, "format" | "cfr">,
+  options: Pick<BuildLocalExecutionPlanOptions, "chunksCarryAudio">,
+): boolean {
+  return options.chunksCarryAudio === true && config.format === "mp4" && config.cfr !== true;
 }
 
 /**
@@ -953,6 +970,18 @@ export function resolveDistributedEngineConfig(config: DistributedRenderConfig):
 function pathInside(root: string, path: string): string | null {
   const rel = relative(root, path);
   return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? null : rel;
+}
+
+/**
+ * Name a video source without the planner's scratch folder, so `meta/videos.json`
+ * (and the planHash over it) is the same on every run with the same inputs.
+ */
+function stableSourcePath(roots: ReadonlyArray<[root: string, prefix: string]>, srcPath: string) {
+  for (const [root, prefix] of roots) {
+    const rel = pathInside(root, srcPath);
+    if (rel !== null) return [prefix, ...rel.split(sep)].filter(Boolean).join("/");
+  }
+  return srcPath;
 }
 
 /**
@@ -1286,12 +1315,18 @@ export async function buildLocalExecutionPlan(
     workCompiledDir: compiledDir,
     workVideoFramesDir: stagedVideoFrames,
   });
+  // Staged frames live inside compiledDir, so they must match first.
+  const sourceRoots: Array<[string, string]> = [
+    [stagedVideoFrames, "video-frames"],
+    [compiledDir, "compiled"],
+    [projectDir, ""],
+  ];
   const planVideosJson: PlanVideosJson = buildPlanVideosJson({
     videos: composition.videos,
     compositionEnd: job.duration ?? Number.NaN,
     extracted: (extractResult.extractionResult?.extracted ?? []).map((ext) => ({
       videoId: ext.videoId,
-      srcPath: ext.srcPath,
+      srcPath: stableSourcePath(sourceRoots, ext.srcPath),
       framePattern: ext.framePattern,
       fps: ext.fps,
       totalFrames: ext.totalFrames,
@@ -1312,13 +1347,17 @@ export async function buildLocalExecutionPlan(
   // Only the assembler reads the mix, so hashing and publishing the final
   // compiled and video trees run beside it instead of after it.
   const digests: PlanFileDigests = options.digests ?? new Map();
+  const chunksCarryAudio = carriesChunkAudio(config, options);
+  // Chunks cut their audio from this track, so it is mixed to the frames' exact length in its one
+  // encode; the assembler pads or trims the track of any other plan.
+  const audioSeconds = chunksCarryAudio ? totalFrames / config.fps : probeResult.duration;
   stageStarted = Date.now();
   const [audioOutcome, overlapOutcome] = await Promise.allSettled([
     runAudioStage({
       projectDir,
       workDir,
       compiledDir: finalCompiledDir,
-      duration: probeResult.duration,
+      duration: audioSeconds,
       ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
       audioGain: cfg.audioGain,
       audios: composition.audios,
@@ -1349,6 +1388,17 @@ export async function buildLocalExecutionPlan(
   if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
     renameSync(audioResult.audioOutputPath, planAudioPath);
   }
+  if (chunksCarryAudio && existsSync(planAudioPath)) {
+    stageStarted = Date.now();
+    const peak = await constrainAacTruePeak({
+      audioPath: planAudioPath,
+      targetDurationSeconds: audioSeconds,
+      signal: abortSignal,
+      timeoutMs: cfg.ffmpegProcessTimeout,
+    });
+    if (!peak.success) throw encoderFailureError("[plan] audio true-peak check failed", peak);
+    logPlanStage(log, "audio-peak", stageStarted);
+  }
 
   // ── Locked config ──
   const ffmpegVersion = await readFfmpegVersion();
@@ -1364,6 +1414,7 @@ export async function buildLocalExecutionPlan(
     effectiveChunkSize,
     chunkCount,
     runtimeEnv,
+    chunksCarryAudio,
   });
 
   // ── Freeze the plan ──
@@ -1474,8 +1525,9 @@ export async function plan(
   projectDir: string,
   config: DistributedRenderConfig,
   planDir: string,
+  options: Pick<BuildLocalExecutionPlanOptions, "chunksCarryAudio"> = {},
 ): Promise<PlanResult> {
-  const executionPlan = await buildLocalExecutionPlan(projectDir, config, planDir);
+  const executionPlan = await buildLocalExecutionPlan(projectDir, config, planDir, options);
   return {
     planDir: executionPlan.executionPlanDir,
     planProtocol: PLAN_PROTOCOL_V1,

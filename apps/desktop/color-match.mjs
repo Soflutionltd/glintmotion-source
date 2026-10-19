@@ -12,6 +12,11 @@ const MIN_SAMPLES = 200;
 /** Gains and casts past these bounds come from a mismatch of content, not of grade. */
 const GAIN_LIMITS = [0.6, 1.6];
 const MAX_CAST_SHIFT = 0.04;
+/**
+ * The export's own drift is small; with the first pass's bounds, the correction would compress an
+ * axis the first pass already compressed and drain small saturated areas.
+ */
+const CORRECTION_LIMITS = { gainLimits: [0.85, 1.18], maxCastShift: 0.02 };
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 /** The probe shows SAMPLE_FRAMES instants of each shot, one per frame, side by side. */
 const PROBE_WIDTH = 360;
@@ -147,7 +152,11 @@ export function oklabStats(rgb24) {
  * lightness moves too. `gains` are the eigenvalues of the map; `bounded` says a gain or the
  * shift of the mean color hit its limit.
  */
-export function matchTransform(source, reference) {
+export function matchTransform(
+  source,
+  reference,
+  { gainLimits = GAIN_LIMITS, maxCastShift = MAX_CAST_SHIFT } = {},
+) {
   const root = matrixFunction(source.covariance, Math.sqrt);
   const inverseRoot = matrixFunction(
     source.covariance,
@@ -158,17 +167,17 @@ export function matchTransform(source, reference) {
   );
   const unbounded = multiply(multiply(inverseRoot, middle), inverseRoot);
   const rawGains = symmetricEigen(unbounded).values;
-  const gains = rawGains.map((value) => clampRange(value, GAIN_LIMITS)).sort((x, y) => x - y);
-  const map = matrixFunction(unbounded, (value) => clampRange(value, GAIN_LIMITS));
+  const gains = rawGains.map((value) => clampRange(value, gainLimits)).sort((x, y) => x - y);
+  const map = matrixFunction(unbounded, (value) => clampRange(value, gainLimits));
   const cast = [reference.mean[1] - source.mean[1], reference.mean[2] - source.mean[2]];
-  const castScale = Math.min(1, MAX_CAST_SHIFT / Math.max(1e-9, Math.hypot(...cast)));
+  const castScale = Math.min(1, maxCastShift / Math.max(1e-9, Math.hypot(...cast)));
   const target = [
     reference.mean[0],
     source.mean[1] + cast[0] * castScale,
     source.mean[2] + cast[1] * castScale,
   ];
   const bounded =
-    castScale < 1 || rawGains.some((value) => value < GAIN_LIMITS[0] || value > GAIN_LIMITS[1]);
+    castScale < 1 || rawGains.some((value) => value < gainLimits[0] || value > gainLimits[1]);
   const apply = (lab) => {
     const centered = lab.map((value, channel) => value - source.mean[channel]);
     return map.map(
@@ -392,7 +401,7 @@ export async function colorMatch(sourceFile, referenceFile, options = {}) {
     return { graded: oklabStats(graded), reference: oklabStats(shown) };
   };
   const first = await measure(buildCube(transform));
-  const correction = matchTransform(first.graded, first.reference);
+  const correction = matchTransform(first.graded, first.reference, CORRECTION_LIMITS);
   const cube = buildCube({
     apply: (lab) => correction.apply(rgbToOklab(...oklabToRgb(...transform.apply(lab)))),
   });

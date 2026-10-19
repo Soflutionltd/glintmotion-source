@@ -107,6 +107,10 @@ describe("color match", () => {
     assert.deepEqual(transform.gains, [1.6, 1.6, 1.6]);
     assert.equal(transform.bounded, true);
     assert.ok(Math.abs(transform.apply([0.5, 0, 0])[1] - 0.04) < 1e-9);
+
+    const correction = matchTransform(flat, wide, { gainLimits: [0.85, 1.18], maxCastShift: 0.02 });
+    assert.deepEqual(correction.gains, [1.18, 1.18, 1.18]);
+    assert.ok(Math.abs(correction.apply([0.5, 0, 0])[1] - 0.02) < 1e-9);
   });
 
   it("writes a 33-point cube that leaves colors alone for an identity transform", () => {

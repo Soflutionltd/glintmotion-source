@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, watch, type Dirent, type FSWatcher } from "node:fs";
+import { existsSync, lstatSync, readdirSync, watch, type Dirent, type FSWatcher } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { isAtomicTempPath } from "@hyperframes/core/atomic-file";
 import {
@@ -41,6 +41,17 @@ export function shouldWatchProjectFile(filename: string): boolean {
   return !parts.some((part) => WATCHER_EXCLUDED_DIRS.has(part));
 }
 
+// ctime moves on a rename too, so a file moved in counts as touched; a removed file always does.
+// The start's own millisecond counts as before it: no person edits within it.
+function untouchedSince(path: string, time: number): boolean {
+  try {
+    const stats = lstatSync(path);
+    return Math.floor(Math.max(stats.mtimeMs, stats.ctimeMs)) <= time;
+  } catch {
+    return false;
+  }
+}
+
 function isDirectory(path: string): boolean {
   try {
     return lstatSync(path).isDirectory();
@@ -56,8 +67,16 @@ function watchProjectTree(
   onChange: (relativePath: string) => void,
 ): () => void {
   if (process.platform !== "linux") {
+    // FSEvents also reports writes made just before the stream started, such as the hf-id
+    // stamping done on open; a file untouched since then has nothing new to say.
+    const startedAt = Date.now();
     const tree = watch(projectDir, { recursive: true }, (_event, filename) => {
-      if (filename) onChange(filename.toString());
+      if (!filename) return;
+      const name = filename.toString();
+      // An event on the project folder itself arrives as the folder's own name.
+      let path = join(projectDir, name);
+      if (name === basename(projectDir) && !existsSync(path)) path = projectDir;
+      if (!untouchedSince(path, startedAt)) onChange(name);
     });
     // An async 'error' (e.g. EMFILE) with no listener would crash the process.
     tree.on("error", () => tree.close());

@@ -62,3 +62,14 @@ commit-msg:
   commands:
     commitlint:
       run: bunx commitlint --edit "{1}"
+
+# Glintmotion ships on macOS only and this fork runs no CI; these tests depend on the platform's
+# file watching, sockets and temp paths, so they run on the Mac before a push that touches them.
+pre-push:
+  commands:
+    macos-platform-tests:
+      glob:
+        - "packages/cli/src/server/**"
+        - "packages/cli/src/capture/**"
+        - "packages/cli/src/whisper/**"
+      run: cd packages/cli && bunx vitest run src/server src/capture src/whisper

@@ -37,7 +37,7 @@ describe("figma storyboard doctrine pins", () => {
   const CATALOG_SURFACES: Array<[string, string[]]> = [
     ["skills/figma/SKILL.md", ["skills", "figma", "SKILL.md"]],
     ["CLAUDE.md", ["CLAUDE.md"]],
-    ["README.md", ["README.md"]],
+    // README.md is Glintmotion's product page here, not a skill catalog.
     ["docs/guides/skills.mdx", ["docs", "guides", "skills.mdx"]],
     ["skills/hyperframes/SKILL.md", ["skills", "hyperframes", "SKILL.md"]],
   ];

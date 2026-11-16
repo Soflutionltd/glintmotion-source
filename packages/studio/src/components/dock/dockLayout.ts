@@ -9,7 +9,7 @@ const MIN_SIDE_W = 200;
 const MIN_SIDE_W_FLOOR = 120;
 const DEFAULT_TIMELINE_H = 360;
 const DEFAULT_LEFT = ["agent", "music", "compositions", "assets", "code", "catalog"] as const;
-const DEFAULT_RIGHT = ["files", "design", "layers", "renders", "variables"] as const;
+const DEFAULT_RIGHT = ["files", "design", "layers", "renders", "variables", "motionBlur"] as const;
 const PROJECTS_W = 220;
 
 /** Preferred side widths; when they overflow the preview's floor the right yields first, then the left. */

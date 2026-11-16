@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, normalize } from "node:path";
 import { loadSeries, seriesOutputKey } from "./templates.mjs";
+import { stripVTControlCharacters } from "node:util";
 
 const FORMATS = ["mp4", "webm", "mov", "gif"];
 const QUALITIES = ["draft", "looks", "delivery"];
@@ -12,13 +13,14 @@ const RECALIBRATE_AFTER = 10;
 const TRACE_MARK = "[Render:trace] ";
 
 /** Capture cost depends on the scene and the frame size, so a calibrated worker count is reused only for both. */
-const workerKey = (dir, options) => JSON.stringify([dir, options.composition ?? "index.html", options.resolution ?? null]);
+const workerKey = (dir, options) =>
+  JSON.stringify([dir, options.composition ?? "index.html", options.resolution ?? null]);
 
 function readTrace(line) {
   const at = line.indexOf(TRACE_MARK);
   if (at === -1) return null;
   try {
-    return JSON.parse(line.slice(at + TRACE_MARK.length).replace(/\u001b\[[0-9;]*m/g, ""));
+    return JSON.parse(stripVTControlCharacters(line.slice(at + TRACE_MARK.length)));
   } catch {
     return null;
   }
@@ -28,7 +30,8 @@ const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
 function projectRelative(value, label) {
   const path = normalize(String(value));
-  if (isAbsolute(path) || path.startsWith("..")) throw new Error(`${label} must be relative to the project folder.`);
+  if (isAbsolute(path) || path.startsWith(".."))
+    throw new Error(`${label} must be relative to the project folder.`);
   return path;
 }
 
@@ -39,7 +42,8 @@ export function renderArgs(dir, options, batchFile, outputKey = "index", workers
   const args = ["render", dir, "--format", format];
   if (workers) args.push("--workers", String(workers));
   if (options.quality !== undefined) {
-    if (!QUALITIES.includes(options.quality)) throw new Error(`quality is one of ${QUALITIES.join(", ")}`);
+    if (!QUALITIES.includes(options.quality))
+      throw new Error(`quality is one of ${QUALITIES.join(", ")}`);
     args.push("--quality", options.quality);
   }
   if (options.fps !== undefined) args.push("--fps", String(options.fps));
@@ -53,14 +57,24 @@ export function renderArgs(dir, options, batchFile, outputKey = "index", workers
     args.push("--composition", projectRelative(options.composition, "composition"));
   }
   if (options.variables !== undefined) {
-    if (typeof options.variables !== "object" || options.variables === null || Array.isArray(options.variables)) {
+    if (
+      typeof options.variables !== "object" ||
+      options.variables === null ||
+      Array.isArray(options.variables)
+    ) {
       throw new Error("variables must be an object of variable values.");
     }
     args.push("--variables", JSON.stringify(options.variables));
   }
   const name = `${basename(dir)}_${stamp()}`;
   if (batchFile) {
-    args.push("--batch", batchFile, "--json", "--output", join(dir, "renders", name, `{${outputKey}}.${format}`));
+    args.push(
+      "--batch",
+      batchFile,
+      "--json",
+      "--output",
+      join(dir, "renders", name, `{${outputKey}}.${format}`),
+    );
     return { args, output: null };
   }
   if (typeof options.from === "number") args.push("--from", String(options.from));
@@ -135,8 +149,10 @@ export function createRenderJobs({ runEngine, workerMemory = null }) {
     if (code === 0 && produced) {
       job.status = "done";
       job.progress = 100;
-      if (job.calibratedWorkers) workerMemory?.set(job.workerKey, { workers: job.calibratedWorkers, uses: 0 });
-      else if (job.workers) workerMemory?.set(job.workerKey, { workers: job.workers, uses: job.workerUses + 1 });
+      if (job.calibratedWorkers)
+        workerMemory?.set(job.workerKey, { workers: job.calibratedWorkers, uses: 0 });
+      else if (job.workers)
+        workerMemory?.set(job.workerKey, { workers: job.workers, uses: job.workerUses + 1 });
     } else {
       if (job.workers) workerMemory?.delete(job.workerKey);
       job.status = "failed";
@@ -147,7 +163,8 @@ export function createRenderJobs({ runEngine, workerMemory = null }) {
 
   function start(dir, options = {}) {
     const running = [...jobs.values()].find((job) => job.status === "running");
-    if (running) throw new Error(`Render ${running.id} is still running; wait for it or cancel it first.`);
+    if (running)
+      throw new Error(`Render ${running.id} is still running; wait for it or cancel it first.`);
     let batchFile = null;
     let outputKey = "index";
     if (options.series === true) {
@@ -206,7 +223,11 @@ export function createRenderJobs({ runEngine, workerMemory = null }) {
         const trace = readTrace(line);
         if (trace?.status !== "checkpoint" || trace.message !== "resolved") continue;
         if (trace.phase === "capture_calibration") job.calibrated = true;
-        if (trace.phase === "capture_strategy" && job.calibrated && Number.isInteger(trace.workerCount)) {
+        if (
+          trace.phase === "capture_strategy" &&
+          job.calibrated &&
+          Number.isInteger(trace.workerCount)
+        ) {
           job.calibratedWorkers = trace.workerCount;
         }
       }
@@ -223,7 +244,10 @@ export function createRenderJobs({ runEngine, workerMemory = null }) {
 
   function get(id) {
     const job = jobs.get(String(id));
-    if (!job) throw new Error(`No render job ${id}. Call glintmotion_render_status without a job to list them.`);
+    if (!job)
+      throw new Error(
+        `No render job ${id}. Call glintmotion_render_status without a job to list them.`,
+      );
     return job;
   }
 

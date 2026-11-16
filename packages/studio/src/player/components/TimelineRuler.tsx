@@ -2,11 +2,9 @@ import { memo, type RefObject } from "react";
 import { useSettledScrollLeft } from "./useSettledScrollLeft";
 import type { TimelineTheme } from "./timelineTheme";
 import { RULER_H, getTimelineBeatEntries } from "./timelineLayout";
-import { formatTimelineTickLabel } from "./timelineRulerGeometry";
-import { usePlayerStore } from "../store/playerStore";
+import { rulerTickText } from "./timelineRulerGeometry";
 import { useMotionCheckStore } from "../store/motionCheckStore";
 import { useAgentStretchStore } from "../store/agentStretchStore";
-import { secondsToFrame } from "../lib/time";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import type { TimelineTimeRange } from "../lib/timelineClipIndex";
 
@@ -18,6 +16,7 @@ interface TimelineRulerProps {
   totalH: number;
   effectiveDuration: number;
   majorTickInterval: number;
+  tickFrameRate?: number;
   theme: TimelineTheme;
   beatAnalysis?: MusicBeatAnalysis | null;
   contentOrigin: number;
@@ -125,13 +124,13 @@ export const TimelineRuler = memo(function TimelineRuler({
   totalH,
   effectiveDuration,
   majorTickInterval,
+  tickFrameRate,
   theme,
   beatAnalysis,
   contentOrigin,
   renderTimeRange,
   scrollRef,
 }: TimelineRulerProps) {
-  const timeDisplayMode = usePlayerStore((s) => s.timeDisplayMode);
   const beatTimes = beatAnalysis?.beatTimes ?? [];
   const beatStrengths = beatAnalysis?.beatStrengths ?? [];
   const beatEntries = getTimelineBeatEntries(beatTimes, beatStrengths, renderTimeRange);
@@ -235,9 +234,7 @@ export const TimelineRuler = memo(function TimelineRuler({
                   fontSize: 10,
                 }}
               >
-                {timeDisplayMode === "frame"
-                  ? secondsToFrame(t)
-                  : formatTimelineTickLabel(t, effectiveDuration, majorTickInterval)}
+                {rulerTickText(t, tickFrameRate, effectiveDuration, majorTickInterval)}
               </span>
               <div className="w-px" style={{ height: RULER_H, background: theme.tickMajor }} />
             </div>

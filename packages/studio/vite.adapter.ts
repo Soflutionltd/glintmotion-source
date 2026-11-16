@@ -23,7 +23,9 @@ import {
   DEFAULT_HISTORY_ROOT,
   openProjectHistory,
   historyCache,
+  originForListeningAddress,
 } from "@hyperframes/studio-server";
+import { encoderJobOptions } from "@hyperframes/studio-server/encoder-options";
 import type { RegistryItem } from "@hyperframes/core/registry";
 import type { BundleOptions } from "@hyperframes/core/compiler";
 import { createRetryingModuleLoader, ensureProducerDist } from "./vite.producer";
@@ -305,6 +307,11 @@ export function createViteAdapter(
     },
 
     runtimeUrl: "/api/runtime.js",
+    serverOrigin: () =>
+      originForListeningAddress(
+        server.httpServer?.address(),
+        server.config.server.https ? "https" : "http",
+      ),
 
     rendersDir: () => resolve(dataDir, "../renders"),
 
@@ -325,7 +332,7 @@ export function createViteAdapter(
         state.status = "cancelled";
         for (const fp of [
           opts.outputPath,
-          opts.outputPath.replace(/\.(mp4|webm|mov)$/, ".meta.json"),
+          opts.outputPath.replace(/\.(mp4|webm|mov|gif)$/, ".meta.json"),
         ]) {
           try {
             if (existsSync(fp)) unlinkSync(fp);
@@ -347,15 +354,15 @@ export function createViteAdapter(
             fps: opts.fps,
             quality: opts.quality as "draft" | "standard" | "high",
             format: opts.format,
+            ...(opts.gifLoop !== undefined ? { gifLoop: opts.gifLoop } : {}),
             ...(renderBodyScripts.length > 0 ? { renderBodyScripts } : {}),
             outputResolution: opts.outputResolution,
             ...(opts.composition ? { entryFile: opts.composition } : {}),
             ...(opts.variables ? { variables: opts.variables } : {}),
-            ...(opts.crf !== undefined ? { crf: opts.crf } : {}),
-            ...(opts.videoBitrate ? { videoBitrate: opts.videoBitrate } : {}),
-            ...(opts.videoFrameFormat ? { videoFrameFormat: opts.videoFrameFormat } : {}),
-            ...(opts.hdrMode ? { hdrMode: opts.hdrMode } : {}),
+            ...encoderJobOptions(opts),
             ...(opts.useGpu ? { useGpu: true } : {}),
+            ...(opts.pageMotionBlur ? { pageMotionBlur: opts.pageMotionBlur } : {}),
+            allowOutsideProjectAssets: true,
           });
           const onProgress = (j: { progress: number; currentStage?: string }) => {
             state.progress = j.progress;
@@ -377,7 +384,7 @@ export function createViteAdapter(
           if (job.audioLoweredDb !== undefined) state.audioLoweredDb = job.audioLoweredDb;
           state.status = "complete";
           state.progress = 100;
-          const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov)$/, ".meta.json");
+          const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov|gif)$/, ".meta.json");
           writeFileSync(
             metaPath,
             JSON.stringify({
@@ -394,7 +401,7 @@ export function createViteAdapter(
           state.status = "failed";
           state.error = err instanceof Error ? err.message : String(err);
           try {
-            const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov)$/, ".meta.json");
+            const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov|gif)$/, ".meta.json");
             writeFileSync(metaPath, JSON.stringify({ status: "failed" }));
           } catch {
             /* ignore */

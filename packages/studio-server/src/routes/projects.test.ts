@@ -71,6 +71,29 @@ describe("GET /projects/:id/signature", () => {
     expect(await response.json()).toEqual({ signature: "cached-sig" });
   });
 
+  // fails without the fix: the polled signature walked every file synchronously, holding a host's event loop (a
+  // desktop app's main process) for the whole walk.
+  it("lets the event loop run while it walks a project", async () => {
+    const projectDir = createProjectDir();
+    for (let i = 0; i < 300; i++)
+      writeFileSync(join(projectDir, `clip-${i}.html`), COMPOSITION_HTML);
+    const app = new Hono();
+    registerProjectRoutes(app, createAdapter(projectDir));
+    let turns = 0;
+    let answered = false;
+    const turn = () => {
+      if (answered) return;
+      turns++;
+      setImmediate(turn);
+    };
+    setImmediate(turn);
+
+    const response = await app.request("http://localhost/projects/demo/signature");
+    answered = true;
+    expect(response.status).toBe(200);
+    expect(turns).toBeGreaterThan(0);
+  });
+
   it("computes a signature that moves when project files change", async () => {
     const projectDir = createProjectDir();
     const app = new Hono();
@@ -163,6 +186,25 @@ describe("registerProjectRoutes — composition discovery (#1384)", () => {
     expect(payload.files).toContain(".hyperframes/studio-motion.json");
     for (const hidden of ["examples/preset.html", "backup/snapshot.html", "app-history.jsonl"])
       expect(payload.files).not.toContain(`.hyperframes/${hidden}`);
+  });
+
+  it("lists nothing under a nested project's .hyperframes/", async () => {
+    const projectDir = createProjectDir();
+    const nested = join(projectDir, "compositions", "x");
+    mkdirSync(join(nested, ".hyperframes", "backup"), { recursive: true });
+    writeFileSync(join(nested, "index.html"), COMPOSITION_HTML);
+    writeFileSync(join(nested, ".hyperframes", "app-history.jsonl"), "{}");
+    writeFileSync(join(nested, ".hyperframes", "studio-motion.json"), "{}");
+    writeFileSync(join(nested, ".hyperframes", "backup", "snapshot.html"), COMPOSITION_HTML);
+    const app = new Hono();
+    registerProjectRoutes(app, createAdapter(projectDir));
+
+    const response = await app.request("http://localhost/projects/demo");
+    const payload = (await response.json()) as { files: string[]; compositions: string[] };
+
+    expect(payload.files).toContain("compositions/x/index.html");
+    expect(payload.compositions).toContain("compositions/x/index.html");
+    expect(payload.files.filter((file) => file.includes("/.hyperframes"))).toEqual([]);
   });
 
   it("omits generated cache files from the project file tree", async () => {

@@ -1,16 +1,62 @@
 {
-  "@hyperframes/aws-lambda": { "packed": 71152, "unpacked": 256920 },
-  "@hyperframes/cli": { "packed": 7517641, "unpacked": 22401400 },
-  "@hyperframes/core": { "packed": 1636442, "unpacked": 3903211 },
-  "@hyperframes/engine": { "packed": 428347, "unpacked": 1436293 },
-  "@hyperframes/gcp-cloud-run": { "packed": 49412, "unpacked": 192672 },
-  "@hyperframes/inspector": { "packed": 808905, "unpacked": 3645432 },
-  "@hyperframes/lint": { "packed": 168745, "unpacked": 654607 },
-  "@hyperframes/parsers": { "packed": 190591, "unpacked": 831243 },
-  "@hyperframes/player": { "packed": 157145, "unpacked": 541601 },
-  "@hyperframes/producer": { "packed": 729380, "unpacked": 2672493 },
-  "@hyperframes/sdk": { "packed": 90662, "unpacked": 325069 },
-  "@hyperframes/shader-transitions": { "packed": 212864, "unpacked": 825937 },
-  "@hyperframes/studio": { "packed": 5998328, "unpacked": 24360208 },
-  "@hyperframes/studio-server": { "packed": 141718, "unpacked": 559199 }
+  "@hyperframes/aws-lambda": {
+    "packed": 80500,
+    "unpacked": 290508
+  },
+  "@hyperframes/cli": {
+    "packed": 8577627,
+    "unpacked": 25500000
+  },
+  "@hyperframes/core": {
+    "packed": 1800000,
+    "unpacked": 4639000
+  },
+  "@hyperframes/engine": {
+    "packed": 510000,
+    "unpacked": 1742862
+  },
+  "@hyperframes/gcp-cloud-run": {
+    "packed": 49412,
+    "unpacked": 170124
+  },
+  "@hyperframes/inspector": {
+    "packed": 880000,
+    "unpacked": 3780000
+  },
+  "@hyperframes/lint": {
+    "packed": 191022,
+    "unpacked": 737342
+  },
+  "@hyperframes/parsers": {
+    "packed": 212000,
+    "unpacked": 915000
+  },
+  "@hyperframes/player": {
+    "packed": 159000,
+    "unpacked": 541601
+  },
+  "@hyperframes/producer": {
+    "packed": 921000,
+    "unpacked": 3491355
+  },
+  "@hyperframes/sdk": {
+    "packed": 90662,
+    "unpacked": 325069
+  },
+  "@hyperframes/shader-transitions": {
+    "packed": 212864,
+    "unpacked": 825937
+  },
+  "@hyperframes/share": {
+    "packed": 148738,
+    "unpacked": 575775
+  },
+  "@hyperframes/studio": {
+    "packed": 6589635,
+    "unpacked": 26703858
+  },
+  "@hyperframes/studio-server": {
+    "packed": 178000,
+    "unpacked": 690000
+  }
 }

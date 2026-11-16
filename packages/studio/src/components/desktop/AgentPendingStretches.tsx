@@ -64,7 +64,7 @@ export const AgentPendingStretches = memo(function AgentPendingStretches({
               }
               className="shrink-0 rounded-md bg-studio-accent/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-accent-ink transition-colors enabled:hover:bg-studio-accent/25 disabled:opacity-60"
             >
-              {index + 1} · {stretch.start.toFixed(2)}–{stretch.end.toFixed(2)} s
+              {index + 1} · {stretch.start.toFixed(2)} to {stretch.end.toFixed(2)} s
               {stretch.composition !== MAIN_COMPOSITION &&
                 ` · ${stretch.composition.split("/").pop()}`}
             </button>

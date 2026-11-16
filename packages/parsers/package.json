@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/parsers",
-  "version": "0.8.174",
+  "version": "0.9.58",
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",
@@ -76,6 +76,12 @@
       "import": "./src/assets.ts",
       "types": "./src/assets.ts"
     },
+    "./css-url-scans": {
+      "bun": "./src/cssUrlScans.ts",
+      "node": "./dist/cssUrlScans.js",
+      "import": "./src/cssUrlScans.ts",
+      "types": "./src/cssUrlScans.ts"
+    },
     "./composition": {
       "bun": "./src/composition.ts",
       "node": "./dist/composition.js",
@@ -124,6 +130,18 @@
       "import": "./src/ffBinaries.ts",
       "types": "./src/ffBinaries.ts"
     },
+    "./media-alpha": {
+      "bun": "./src/mediaAlpha.ts",
+      "node": "./dist/mediaAlpha.js",
+      "import": "./src/mediaAlpha.ts",
+      "types": "./src/mediaAlpha.ts"
+    },
+    "./media-streams": {
+      "bun": "./src/mediaStreams.ts",
+      "node": "./dist/mediaStreams.js",
+      "import": "./src/mediaStreams.ts",
+      "types": "./src/mediaStreams.ts"
+    },
     "./asset-resolution": {
       "bun": "./src/assetResolution.ts",
       "node": "./dist/assetResolution.js",
@@ -141,6 +159,18 @@
       "node": "./dist/timeSpans.js",
       "import": "./src/timeSpans.ts",
       "types": "./src/timeSpans.ts"
+    },
+    "./media-timing": {
+      "bun": "./src/mediaTiming.ts",
+      "node": "./dist/mediaTiming.js",
+      "import": "./src/mediaTiming.ts",
+      "types": "./src/mediaTiming.ts"
+    },
+    "./reference-resolver": {
+      "bun": "./src/referenceResolver.ts",
+      "node": "./dist/referenceResolver.js",
+      "import": "./src/referenceResolver.ts",
+      "types": "./src/referenceResolver.ts"
     },
     "./composition-duration": {
       "bun": "./src/compositionDuration.ts",
@@ -193,6 +223,10 @@
         "import": "./dist/assets.js",
         "types": "./dist/assets.d.ts"
       },
+      "./css-url-scans": {
+        "import": "./dist/cssUrlScans.js",
+        "types": "./dist/cssUrlScans.d.ts"
+      },
       "./composition": {
         "import": "./dist/composition.js",
         "types": "./dist/composition.d.ts"
@@ -225,6 +259,14 @@
         "import": "./dist/ffBinaries.js",
         "types": "./dist/ffBinaries.d.ts"
       },
+      "./media-alpha": {
+        "import": "./dist/mediaAlpha.js",
+        "types": "./dist/mediaAlpha.d.ts"
+      },
+      "./media-streams": {
+        "import": "./dist/mediaStreams.js",
+        "types": "./dist/mediaStreams.d.ts"
+      },
       "./asset-resolution": {
         "import": "./dist/assetResolution.js",
         "types": "./dist/assetResolution.d.ts"
@@ -236,6 +278,14 @@
       "./time-spans": {
         "import": "./dist/timeSpans.js",
         "types": "./dist/timeSpans.d.ts"
+      },
+      "./media-timing": {
+        "import": "./dist/mediaTiming.js",
+        "types": "./dist/mediaTiming.d.ts"
+      },
+      "./reference-resolver": {
+        "import": "./dist/referenceResolver.js",
+        "types": "./dist/referenceResolver.d.ts"
       },
       "./composition-duration": {
         "import": "./dist/compositionDuration.js",
@@ -267,6 +317,6 @@
     "tsup": "^8.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

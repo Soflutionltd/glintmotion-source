@@ -38,9 +38,10 @@ import {
   validateVariablesAgainstSchema,
 } from "../../utils/variables.js";
 import { normalizeErrorMessage } from "../../utils/errorMessage.js";
-import { warnOnDimensionMismatch } from "./_dimensions.js";
+import { resolveOutputResolutionFromSize } from "./_dimensions.js";
 import { runWithConcurrencyLimit } from "../../utils/concurrency.js";
 import { requireStack } from "./state.js";
+import type { DeliveryFlagValues } from "../../utils/deliveryFlags.js";
 
 // Dynamic-import the SDK so tsup keeps it out of the static-import head of
 // the CLI bundle. See sites.ts loadSDK() for the full rationale.
@@ -49,7 +50,7 @@ async function loadSDK(): Promise<typeof import("@hyperframes/aws-lambda/sdk")> 
 }
 
 /** Arguments accepted by `hyperframes lambda render-batch`. */
-export interface RenderBatchArgs {
+export interface RenderBatchArgs extends DeliveryFlagValues {
   projectDir: string;
   stackName: string;
   /** Path to the JSONL batch file. Each line is a {@link BatchEntry}. */
@@ -177,13 +178,15 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
     failCommand();
   }
 
-  warnOnDimensionMismatch({
-    projectDir,
-    cliWidth: args.width,
-    cliHeight: args.height,
-    outputResolution: args.outputResolution,
-    quiet: args.json,
-  });
+  args = {
+    ...args,
+    outputResolution: resolveOutputResolutionFromSize({
+      projectDir,
+      cliWidth: args.width,
+      cliHeight: args.height,
+      outputResolution: args.outputResolution,
+    }),
+  };
 
   // Pre-validate every entry's variables against the composition's
   // schema. Mismatches print as warnings; strict mode aborts before any
@@ -226,16 +229,20 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
   // Deploy the site once and reuse it across every entry. --site-id and
   // --dry-run both skip the deploy via a synthesised handle.
   let siteHandle: SiteHandle;
+  const { assertStackReadsSites, deploySite, siteHandleFromId } = await loadSDK();
+  if (!args.dryRun) {
+    await assertStackReadsSites({ stateMachineArn: stack.stateMachineArn, region: stack.region });
+  }
   if (args.siteId) {
-    siteHandle = makePlaceholderSiteHandle(args.siteId, stack.bucketName);
+    siteHandle = siteHandleFromId(stack.bucketName, args.siteId);
   } else if (args.dryRun) {
-    siteHandle = makePlaceholderSiteHandle("dry-run-site", stack.bucketName);
+    siteHandle = siteHandleFromId(stack.bucketName, "dry-run-site");
   } else {
-    const { deploySite } = await loadSDK();
     siteHandle = await deploySite({
       projectDir,
       bucketName: stack.bucketName,
       region: stack.region,
+      onNotice: (message) => console.error(c.dim(message)),
     });
     if (!args.json) {
       console.log(
@@ -275,6 +282,7 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
     }
     try {
       const handle = await renderToLambda({
+        projectDir,
         siteHandle,
         bucketName: stack.bucketName,
         stateMachineArn: stack.stateMachineArn,
@@ -334,23 +342,6 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
 }
 
 /**
- * Synthesise a SiteHandle from a known siteId for paths that skip the
- * `deploySite` upload (`--site-id` and `--dry-run`). The SDK reads only
- * `siteId` + `projectS3Uri` when `uploaded: false`, so the byte / time
- * fields are intentional placeholders.
- */
-function makePlaceholderSiteHandle(siteId: string, bucketName: string): SiteHandle {
-  return {
-    siteId,
-    bucketName,
-    projectS3Uri: `s3://${bucketName}/sites/${siteId}/project.tar.gz`,
-    bytes: 0,
-    uploadedAt: "",
-    uploaded: false,
-  };
-}
-
-/**
  * Build the shared wire {@link SerializableDistributedRenderConfig} used
  * for every entry in a `hyperframes lambda render-batch` run. Extracted for
  * boundary-test coverage of the aspect-agnostic flag threading (per-entry
@@ -371,6 +362,10 @@ export function buildLambdaBatchRenderConfig(
     chunkSize: args.chunkSize,
     maxParallelChunks: args.maxParallelChunks,
     targetChunkFrames: args.targetChunkFrames,
+    keyframeIntervalSeconds: args.keyframeIntervalSeconds,
+    proresProfile: args.proresProfile,
+    maxBitrate: args.maxBitrate,
+    bufferSize: args.bufferSize,
     workerConcurrency,
     runtimeCap: "lambda",
   };

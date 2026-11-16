@@ -1,3 +1,5 @@
+import "./utils/hideChildConsoles.js";
+import "./utils/windowsExeSearch.js";
 import { checkForUpdate } from "./utils/updateCheck.js";
 import { refreshSkillsCache } from "./utils/skillsUpdateCheck.js";
 

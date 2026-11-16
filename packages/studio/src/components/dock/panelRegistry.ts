@@ -12,6 +12,7 @@ export const BASE_PANEL_IDS = [
   "renders",
   "variables",
   "slideshow",
+  "motionBlur",
 ] as const;
 
 /** Panels that need the Glintmotion desktop host (its project list and agent bridge). */
@@ -61,6 +62,11 @@ export const PANEL_DEFINITIONS = {
   renders: { title: "Renders", zone: "right", reopen: { near: "design", direction: "within" } },
   variables: { title: "Variables", zone: "right", reopen: { near: "design", direction: "within" } },
   slideshow: { title: "Slideshow", zone: "right", reopen: { near: "design", direction: "within" } },
+  motionBlur: {
+    title: "Blur",
+    zone: "right",
+    reopen: { near: "design", direction: "within" },
+  },
   projects: { title: "Projects", zone: "left", reopen: { near: "preview", direction: "left" } },
   agent: { title: "Agent", zone: "left", reopen: { near: "compositions", direction: "within" } },
   music: { title: "Music", zone: "left", reopen: { near: "compositions", direction: "within" } },

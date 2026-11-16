@@ -521,6 +521,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason }: St
                   inspectorButtonActive={inspectorButtonActive}
                   inspectorPanelActive={inspectorPanelActive}
                   onExport={handleExport}
+                  beforeShare={previewPersistence.waitForPendingDomEditSaves}
                 />
                 {previewPersistence.domEditSaveQueuePaused && !externalFileChanges.blocked && (
                   <SaveQueuePausedBanner

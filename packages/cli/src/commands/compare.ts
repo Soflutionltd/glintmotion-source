@@ -1,17 +1,19 @@
-import { failCommand } from "../utils/commandResult.js";
 import {
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
 } from "node:fs";
+import { makeOutputFolder } from "../utils/outputFolder.js";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type { Page } from "puppeteer-core";
 import { createContactSheet } from "../capture/contactSheet.js";
 import { parseBatchRows } from "./batchRender.js";
@@ -21,6 +23,9 @@ import { displayPathFromInput, readOptionalString, resolveFromBase } from "../ut
 import { trackCompareSheet } from "../telemetry/events.js";
 import { withMeta } from "../utils/updateCheck.js";
 import type { Example } from "./_examples.js";
+import { isPathInside } from "@hyperframes/parsers/asset-paths";
+import { failCaught } from "../utils/jsonError.js";
+import { CliUsageError } from "../utils/commandResult.js";
 
 const MAX_COMPARE_VARIANTS = 16;
 const MAX_COMPARE_TIMES = 8;
@@ -107,10 +112,12 @@ function parseLabels(value: unknown, pathCount: number): string[] | undefined {
   if (!raw) return undefined;
   const labels = raw.split(",").map((part) => part.trim());
   if (labels.some((label) => label.length === 0)) {
-    throw new Error("--labels entries must be non-empty");
+    throw new CliUsageError("--labels entries must be non-empty");
   }
   if (labels.length !== pathCount) {
-    throw new Error(`--labels count (${labels.length}) must match path count (${pathCount})`);
+    throw new CliUsageError(
+      `--labels count (${labels.length}) must match path count (${pathCount})`,
+    );
   }
   return labels;
 }
@@ -120,10 +127,10 @@ function parseAtTimes(value: unknown): number[] {
   if (!raw) return [0];
   const times = raw.split(",").map((part) => Number(part.trim()));
   if (times.some((time) => !Number.isFinite(time) || time < 0)) {
-    throw new Error("--at must be non-negative seconds, comma-separated (e.g. 1,4.5,9)");
+    throw new CliUsageError("--at must be non-negative seconds, comma-separated (e.g. 1,4.5,9)");
   }
   if (times.length > MAX_COMPARE_TIMES) {
-    throw new Error(`--at takes at most ${MAX_COMPARE_TIMES} times`);
+    throw new CliUsageError(`--at takes at most ${MAX_COMPARE_TIMES} times`);
   }
   return times;
 }
@@ -140,9 +147,9 @@ function batchVariants(
   cwd: string,
 ): CompareVariantSpec[] {
   const batchPath = resolveFromBase(cwd, readOptionalString(args.batch) ?? "");
-  if (paths.length !== 1) throw new Error("--batch takes exactly one project path");
+  if (paths.length !== 1) throw new CliUsageError("--batch takes exactly one project path");
   const rows = parseBatchRows(readFileSync(batchPath, "utf-8"), batchPath);
-  if (rows.length < 2) throw new Error("--batch needs 2+ rows to compare");
+  if (rows.length < 2) throw new CliUsageError("--batch needs 2+ rows to compare");
   const labels = parseLabels(args.labels, rows.length);
   const project = paths[0]!;
   return rows.map((row, index) => ({
@@ -158,7 +165,17 @@ function parseColumns(value: unknown): number | undefined {
   if (!raw) return undefined;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error("--cols must be a positive integer");
+    throw new CliUsageError("--cols must be a positive integer");
+  }
+  return parsed;
+}
+
+function parseTimeoutMs(value: unknown): number {
+  const raw = readOptionalString(value);
+  if (!raw) return DEFAULT_RENDER_READY_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new CliUsageError("--timeout must be a positive integer number of milliseconds");
   }
   return parsed;
 }
@@ -173,7 +190,7 @@ function pathVariants(
   cwd: string,
 ): CompareVariantSpec[] {
   if (paths.length < 2) {
-    throw new Error("need 2+ paths to compare");
+    throw new CliUsageError("need 2+ paths to compare");
   }
   const labels = parseLabels(args.labels, paths.length);
   return paths.map((input, index) => ({
@@ -207,9 +224,7 @@ export function parseCompareArgs(
     atTimes: parseAtTimes(args.at),
     cols: parseColumns(args.cols),
     json: args.json === true,
-    timeoutMs:
-      Number.parseInt(readOptionalString(args.timeout) ?? "", 10) ||
-      DEFAULT_RENDER_READY_TIMEOUT_MS,
+    timeoutMs: parseTimeoutMs(args.timeout),
   };
 }
 
@@ -262,18 +277,39 @@ function inputError(variant: CompareVariantSpec): Error {
   );
 }
 
-function stageHtmlVariant(variant: CompareVariantSpec): PreparedCompareVariant {
+function copyVariantSiblings(
+  sourceDir: string,
+  destinationDir: string,
+  stagingPaths: readonly string[],
+): void {
+  mkdirSync(destinationDir, { recursive: true });
+  for (const entry of readdirSync(sourceDir)) {
+    if (entry === "node_modules" || entry === ".git") continue;
+    const src = join(sourceDir, entry);
+    const dest = join(destinationDir, entry);
+    if (stagingPaths.includes(src)) continue;
+    if (stagingPaths.some((path) => isPathInside(path, src))) {
+      copyVariantSiblings(src, dest, stagingPaths);
+      continue;
+    }
+    cpSync(src, dest, {
+      recursive: true,
+      filter: (path) => basename(path) !== "node_modules" && basename(path) !== ".git",
+    });
+  }
+}
+
+function stageHtmlVariant(
+  variant: CompareVariantSpec,
+  existingStagedDirs: readonly string[],
+): PreparedCompareVariant {
   const stagedDir = mkdtempSync(join(tmpdir(), "hf-compare-variant-"));
   try {
     // Copy the composition's sibling files but skip heavy/irrelevant trees — a
     // variant sitting next to node_modules or .git shouldn't drag them into tmp.
-    cpSync(dirname(variant.inputPath), stagedDir, {
-      recursive: true,
-      filter: (src) => {
-        const base = basename(src);
-        return base !== "node_modules" && base !== ".git";
-      },
-    });
+    const sourceDir = realpathSync(dirname(variant.inputPath));
+    const stagingPaths = [stagedDir, ...existingStagedDirs].map((path) => realpathSync(path));
+    copyVariantSiblings(sourceDir, realpathSync(stagedDir), stagingPaths);
     const sourceName = basename(variant.inputPath);
     if (sourceName !== "index.html") {
       renameSync(join(stagedDir, sourceName), join(stagedDir, "index.html"));
@@ -307,7 +343,10 @@ export function prepareCompareVariantProjects(
         continue;
       }
       if (stat.isFile() && extname(variant.inputPath).toLowerCase() === ".html") {
-        prepared.push(stageHtmlVariant(variant));
+        const stagedDirs = prepared.flatMap((project) =>
+          project.stagedDir ? [project.stagedDir] : [],
+        );
+        prepared.push(stageHtmlVariant(variant, stagedDirs));
         continue;
       }
       throw inputError(variant);
@@ -387,13 +426,13 @@ async function captureCompareVariant(
   let renderReadyTimedOut = false;
   try {
     const { captureSnapshots } = await import("./snapshot.js");
-    const framePaths = await captureSnapshots(variant.projectDir, {
+    const { paths: framePaths } = await captureSnapshots(variant.projectDir, {
       at: opts.times,
       includeEnd: false,
       outputDir: opts.frameDir,
       timeout: opts.timeoutMs,
       variables: variant.variables,
-      quiet: true,
+      log: () => undefined,
       record: false,
       onReady: (info) => {
         renderReadyTimedOut = info.renderReadyTimedOut;
@@ -452,7 +491,7 @@ async function renderCompareSheet(parsed: ParsedCompareArgs): Promise<CompareSuc
     }
 
     const layout = sheetLayout(parsed, variants);
-    mkdirSync(dirname(parsed.outPath), { recursive: true });
+    makeOutputFolder(dirname(parsed.outPath));
     await createContactSheet(framePaths, parsed.outPath, {
       cols: layout.cols,
       maxImages: framePaths.length,
@@ -553,13 +592,7 @@ export default defineCommand({
         printRepeatedLines(payload.repeated);
       }
     } catch (err) {
-      const message = normalizeErrorMessage(err);
-      if (jsonRequested) {
-        printJson({ ok: false, error: message });
-      } else {
-        console.error(`\n${c.error("✗")} Compare failed: ${message}`);
-      }
-      failCommand();
+      failCaught(err, jsonRequested, (m) => `\n${c.error("✗")} Compare failed: ${m}`, printJson);
     }
   },
 });

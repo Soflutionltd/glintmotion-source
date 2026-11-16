@@ -40,7 +40,8 @@ interface RangeServer {
 
 async function serveBytes(
   body: Buffer,
-  options: { honourRange: boolean; failRangeStart?: number },
+  // `drop` cuts the first `times` responses whose range covers byte `at`, right before it.
+  options: { honourRange: boolean; drop?: { at: number; times: number } },
 ): Promise<RangeServer> {
   const ranges: (string | undefined)[] = [];
   const server: Server = createServer((req, res) => {
@@ -60,12 +61,17 @@ async function serveBytes(
       "content-length": end - start + 1,
       "content-range": `bytes ${start}-${end}/${body.length}`,
     });
-    if (start === options.failRangeStart) {
-      res.write(body.subarray(start, start + 1024), () => res.destroy());
+    const drop = options.drop;
+    if (drop && drop.times > 0 && start <= drop.at && drop.at <= end) {
+      drop.times--;
+      res.write(body.subarray(start, drop.at), () => res.destroy());
       return;
     }
     res.end(body.subarray(start, end + 1));
   });
+  // Windows completes a large loopback write at once, so the 5 s keep-alive idle clock
+  // started before a slow reader finished and closed the socket under it.
+  server.keepAliveTimeout = 0;
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return {
@@ -74,8 +80,6 @@ async function serveBytes(
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
-
-const MiB = 1024 * 1024;
 
 function patternBytes(length: number): Buffer {
   const bytes = Buffer.alloc(length);
@@ -259,6 +263,27 @@ describe("cloud/download", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "with replaceLink, replaces an output link instead of writing to its target",
+    async () => {
+      const target = join(dir, "target.mp4");
+      writeFileSync(target, "keep");
+      chmodSync(target, 0o755);
+      const alias = join(dir, "alias.mp4");
+      symlinkSync("target.mp4", alias);
+      await downloadToFile("https://example/x", alias, {
+        fetchImpl: makeBytesFetch(new Uint8Array([7])),
+        replaceLink: true,
+      });
+      const downloaded = readFileSync(alias);
+      const written = lstatSync(alias);
+      expect(readFileSync(target, "utf8")).toBe("keep");
+      expect(written.isFile()).toBe(true);
+      expect(written.mode & 0o111).toBe(0);
+      expect(downloaded).toEqual(Buffer.from([7]));
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "follows a relative output link inside a linked folder to the real target",
     async () => {
       mkdirSync(join(dir, "real/deep/sub"), { recursive: true });
@@ -280,6 +305,10 @@ describe("cloud/download", () => {
     afterEach(async () => {
       await Promise.all(servers.splice(0).map((server) => server.close()));
     });
+    // Small parts keep the split the same while moving little data: a Windows runner's loopback
+    // has carried a single connection at ~1 MB/s, past the timeout for megabyte bodies.
+    const PART = 64 * 1024;
+    const options = { partBytes: PART };
     async function serve(...args: Parameters<typeof serveBytes>) {
       const server = await serveBytes(...args);
       servers.push(server);
@@ -287,14 +316,14 @@ describe("cloud/download", () => {
     }
 
     it("splits a large file into parallel ranged requests", async () => {
-      const body = patternBytes(60 * MiB + 123);
+      const body = patternBytes(7.5 * PART + 123);
       const server = await serve(body, { honourRange: true });
       const dest = join(dir, "out.mp4");
-      const result = await downloadToFile(server.url, dest);
+      const result = await downloadToFile(server.url, dest, options);
       expect(result.bytes).toBe(body.length);
       expect(readFileSync(dest).equals(body)).toBe(true);
       expect(server.ranges).toHaveLength(8);
-      expect(server.ranges[0]).toBe(`bytes=0-${8 * MiB - 1}`);
+      expect(server.ranges[0]).toBe(`bytes=0-${PART - 1}`);
       expect(readdirSync(dir)).toEqual(["out.mp4"]);
     });
 
@@ -303,29 +332,42 @@ describe("cloud/download", () => {
         const body = patternBytes(size);
         const server = await serve(body, { honourRange: true });
         const dest = join(dir, `out-${size}.mp4`);
-        await downloadToFile(server.url, dest);
+        await downloadToFile(server.url, dest, options);
         expect(readFileSync(dest).equals(body)).toBe(true);
-        expect(server.ranges[0]).toBe(`bytes=0-${8 * MiB - 1}`);
+        expect(server.ranges[0]).toBe(`bytes=0-${PART - 1}`);
         expect(server.ranges.slice(1)).toEqual(size === 0 ? [undefined] : []);
       }
     });
 
     it("streams the whole file in one request when the server ignores Range", async () => {
-      const body = patternBytes(20 * MiB);
+      const body = patternBytes(2.5 * PART);
       const server = await serve(body, { honourRange: false });
       const dest = join(dir, "out.mp4");
-      await downloadToFile(server.url, dest);
+      await downloadToFile(server.url, dest, options);
       expect(readFileSync(dest).equals(body)).toBe(true);
-      expect(server.ranges).toEqual([`bytes=0-${8 * MiB - 1}`]);
+      expect(server.ranges).toEqual([`bytes=0-${PART - 1}`]);
     });
 
-    it("keeps the previous output and leaves no staged file when one part fails", async () => {
-      const body = patternBytes(50 * MiB);
-      const server = await serve(body, { honourRange: true, failRangeStart: 8 * MiB });
+    it("resumes a range whose connection drops mid-body from the bytes it already has", async () => {
+      const body = patternBytes(6.25 * PART);
+      const at = PART + 1024;
+      const server = await serve(body, { honourRange: true, drop: { at, times: 2 } });
+      const dest = join(dir, "out.mp4");
+      const result = await downloadToFile(server.url, dest, options);
+      expect(result.bytes).toBe(body.length);
+      expect(readFileSync(dest).equals(body)).toBe(true);
+      expect(server.ranges.filter((range) => range?.startsWith(`bytes=${at}-`))).toHaveLength(2);
+    });
+
+    it("keeps the previous output and leaves no staged file when one part keeps dropping", async () => {
+      const body = patternBytes(6.25 * PART);
+      const server = await serve(body, {
+        honourRange: true,
+        drop: { at: PART + 1024, times: Infinity },
+      });
       const dest = join(dir, "out.mp4");
       writeFileSync(dest, "previous render");
-      await expect(downloadToFile(server.url, dest)).rejects.toThrow();
-      expect(server.ranges.length).toBeGreaterThan(1);
+      await expect(downloadToFile(server.url, dest, options)).rejects.toThrow(/dropped 4 times/);
       expect(readFileSync(dest, "utf8")).toBe("previous render");
       expect(readdirSync(dir)).toEqual(["out.mp4"]);
     });

@@ -1,8 +1,8 @@
-import { failCommand } from "../utils/commandResult.js";
+import { failUsage } from "../utils/commandResult.js";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { defineCommand } from "citty";
-import * as clack from "@clack/prompts";
+import { defineCommand } from "../utils/defineCommand.js";
+import * as clack from "../ui/prompts.js";
 import open from "open";
 import type { Example } from "./_examples.js";
 import {
@@ -12,15 +12,22 @@ import {
 } from "../telemetry/events.js";
 import { shouldTrack } from "../telemetry/client.js";
 import { getDoctorSummary } from "../telemetry/feedback.js";
-import { readConfig, type RecentRenderRecord } from "../telemetry/config.js";
-import { publishProjectArchive } from "../utils/publishProject.js";
+import { readConfig, type LastCheckRecord, type RecentRenderRecord } from "../telemetry/config.js";
+import { createPublishArchive, publishProjectArchive } from "../utils/publishProject.js";
 import { submitCatalogSearchMiss, submitFeedback } from "../utils/submitFeedback.js";
 import { buildIssueUrl, HYPERFRAMES_REPO_URL } from "../utils/feedbackIssue.js";
 import { VERSION } from "../version.js";
 import { c } from "../ui/colors.js";
+import { isUnattended } from "../utils/attendedTerminal.js";
 import { parseFeedbackRating } from "../utils/feedbackRating.js";
 import { feedbackEmail, parseFeedbackSource } from "../utils/feedbackSource.js";
 import { lintFeedbackComment, type FeedbackLintInput } from "../utils/feedbackLint.js";
+import {
+  type LeftOutReference,
+  type OutsideFileReference,
+  outsideFilesNotice,
+} from "../utils/leftOutReference.js";
+import { trackUploadLeftOut } from "../telemetry/uploadLeftOut.js";
 
 export const examples: Example[] = [
   ["Submit render feedback", 'hyperframes feedback --rating 8 --comment "fast but font missing"'],
@@ -56,10 +63,24 @@ export function buildTelemetryJoinKeys(input: {
   feedbackId: string;
   anonymousId: string;
   recentRenders?: RecentRenderRecord[];
+  lastCheck?: LastCheckRecord;
+  now?: number;
 }): string {
   const parts = [`fid=${input.feedbackId}`, `tid=${input.anonymousId}`];
   if (input.recentRenders?.length) {
     parts.push(`renders=${input.recentRenders.map((r) => `${r.id}${r.ok ? "" : "!"}`).join(",")}`);
+  }
+  if (input.lastCheck) {
+    const codes = Object.entries(input.lastCheck.codes).map(
+      ([code, n]) => `${code.slice(0, 24)}*${n}`,
+    );
+    const result =
+      input.lastCheck.exitCode === undefined ? "unfinished" : `exit${input.lastCheck.exitCode}`;
+    parts.push(`check=${result}${codes.length ? `:${codes.join(",")}` : ""}`);
+    const minutes = Math.round(
+      ((input.now ?? Date.now()) - Date.parse(input.lastCheck.at)) / 60_000,
+    );
+    if (Number.isFinite(minutes) && minutes >= 0) parts.push(`check_age=${minutes}m`);
   }
   return parts.join(" ");
 }
@@ -88,7 +109,7 @@ async function promptConfirm(): Promise<boolean> {
 async function confirmFileIssue(dir: string, yes: boolean): Promise<boolean> {
   printIssueConsent(dir);
   if (yes) return true;
-  if (!process.stdout.isTTY) {
+  if (isUnattended()) {
     console.log(`  ${c.dim("Re-run with --yes to publish the repro and file the issue.")}\n`);
     return false;
   }
@@ -105,8 +126,26 @@ async function publishRepro(dir: string): Promise<string | undefined> {
   const spinner = clack.spinner();
   spinner.start("Publishing minimal repro...");
   try {
-    const published = await publishProjectArchive(dir);
+    const leftOut: string[] = [];
+    const references: LeftOutReference[] = [];
+    const outsideFiles: OutsideFileReference[] = [];
+    const archive = createPublishArchive(
+      dir,
+      (warning, reference) => {
+        leftOut.push(warning);
+        references.push(reference);
+      },
+      (reference) => outsideFiles.push(reference),
+    );
+    trackUploadLeftOut("feedback", references);
+    if (outsideFiles.length > 0) {
+      spinner.stop("Repro prepared");
+      clack.log.info(outsideFilesNotice(outsideFiles));
+      spinner.start("Publishing minimal repro...");
+    }
+    const published = await publishProjectArchive(dir, { archive });
     spinner.stop(c.success("Repro published"));
+    for (const warning of leftOut) clack.log.warn(c.warn(warning));
     return published.url;
   } catch (err: unknown) {
     spinner.stop(c.error("Publish failed"));
@@ -173,15 +212,15 @@ function reportRating(
   const rating = raw === undefined ? undefined : parseFeedbackRating(raw);
   if (rating === null) {
     console.error(c.error("Rating must be an integer between 0 and 10"));
-    failCommand();
+    failUsage();
   }
   if (rating === undefined && !comment?.trim()) {
     console.error(c.error("Give a --rating (an integer from 0 to 10), a --comment, or both"));
-    failCommand();
+    failUsage();
   }
   if (rating === undefined && fileIssue) {
     console.error(c.error("--file-issue needs a --rating"));
-    failCommand();
+    failUsage();
   }
   return rating;
 }
@@ -278,7 +317,7 @@ export default defineCommand({
     const source = parseFeedbackSource(args.source);
     if (source === null) {
       console.error(c.error('Source must be "person" or "agent"'));
-      failCommand();
+      failUsage();
     }
 
     if (!shouldTrack()) {
@@ -297,6 +336,7 @@ export default defineCommand({
       feedbackId,
       anonymousId: config.anonymousId,
       recentRenders: config.recentRenders,
+      lastCheck: config.lastCheck,
     });
     const envWithJoinKeys = doctorSummary ? `${doctorSummary} ${joinKeys}` : joinKeys;
 

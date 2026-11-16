@@ -1,3 +1,7 @@
+import { declareClipRevealAware } from "@hyperframes/core/runtime/clip-reveal";
+
+declareClipRevealAware();
+
 export { init, type HyperShaderConfig, type TransitionConfig } from "./hyper-shader.js";
 export { isHtmlInCanvasCaptureSupported } from "./capture.js";
 export {

@@ -25,6 +25,7 @@ import {
 } from "./mediaCapture.js";
 import { extractVisibleText } from "./contentExtractor.js";
 import { isDegradableEvaluateTimeoutError } from "./captureTimeout.js";
+import { waitForPageReady } from "./navigateForCapture.js";
 import { lazyScrollForCapture } from "./lazyScrollForCapture.js";
 import { filterExtractedScripts } from "./filterExtractedScripts.js";
 
@@ -362,6 +363,11 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
   };
   await runScreenshotCapture();
   const runHtmlExtraction = async (): Promise<void> => {
+    await waitForPageReady(page1, {
+      timeoutMs: Math.min(15_000, remainingMs()),
+      networkIdle: "after-load",
+    });
+
     // Catalog all assets (must run before extractHtml which converts img src to data URLs)
     progress("design", "Cataloging assets...");
     try {
@@ -379,7 +385,13 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
 
     // ── MUTATION phase: extractHtml modifies the live DOM (converts images to data URLs) ──
     progress("extract", "Extracting HTML & CSS...");
-    extracted = await extractHtml(page1, { settleTime: 1000 });
+    extracted = await extractHtml(page1, {
+      settleTime: 1000,
+      onWarning: (message) => {
+        warnings.push(message);
+        progress("warn", message);
+      },
+    });
     state.extracted = extracted;
 
     // Strip framework scripts from the extracted body — keep visual library scripts

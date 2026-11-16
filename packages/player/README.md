@@ -28,6 +28,8 @@ If you need a classic `<script>` tag instead of ESM, use the explicit global bui
 
 The player loads the composition in a sandboxed iframe, auto-detects its dimensions and duration, and scales it responsively to fit the container.
 
+Add or remove `controls` at any time. When shown, the controls reflect the current playback state, position and speed.
+
 ### With a framework
 
 ```typescript
@@ -50,6 +52,8 @@ Set `type` to a video type and the player plays `src` in a `<video playsinline>`
   controls
 ></hyperframes-player>
 ```
+
+Removing or emptying `src` unloads the video and pauses it at 0:00.
 
 ### Poster image
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -12,9 +12,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { mediaIdPathSegment } from "@hyperframes/engine";
 import { planFileSha256, recomputePlanHashFromPlanDir } from "../render/stages/freezePlan.js";
 import { canonicalJsonStringify, sha256Hex } from "../render/stages/planHash.js";
+import { chunkAudioSlicePath } from "./chunkAudio.js";
 import { buildLocalExecutionPlan } from "./plan.js";
 import { CURRENT_PLAN_PROTOCOL } from "./planProtocol.js";
 import { FFMPEG_VERSION_MISMATCH, renderChunk, RenderChunkValidationError } from "./renderChunk.js";
@@ -28,12 +31,33 @@ import {
   PlanV2IntegrityError,
   publishPlanV2FromV1,
   publishPlanV2FromExecutionPlan,
+  type PlanV2Manifest,
   planV2WithPublisher,
   readPlanV2Manifest,
+  readValidatedPlanV2Materialization,
   validatePlanV2MaterializedTarget,
 } from "./planV2.js";
+import { planV2BlobPath } from "./planV2Layout.js";
 import { LocalPlanV2ArtifactPublisher, type PlanV2ArtifactPublisher } from "./planV2Publisher.js";
 import { buildPlanVideosJson, isPlanAudioArtifactPath, type PlanVideosJson } from "./shared.js";
+
+// Frozen public reader/materializer from base 5e50ac1; execute it rather than imitating its hash rules.
+const legacySource = readFileSync(
+  new URL("./__fixtures__/planV2-reader-5e50ac1.txt", import.meta.url),
+  "utf8",
+);
+const legacyRoot = mkdtempSync(join(tmpdir(), "hf-v2-legacy-reader-"));
+afterAll(() => rmSync(legacyRoot, { recursive: true, force: true }));
+const legacyPath = join(legacyRoot, "reader.ts");
+writeFileSync(
+  legacyPath,
+  legacySource.replace(
+    /from "([^"]+)"/g,
+    (_match, specifier: string) =>
+      `from "${specifier.startsWith(".") ? new URL(specifier, import.meta.url).href : import.meta.resolve(specifier)}"`,
+  ),
+);
+const legacyReader = await import(pathToFileURL(legacyPath).href);
 
 const tempDirs: string[] = [];
 
@@ -194,7 +218,53 @@ function createV1Plan(
   return planDir;
 }
 
+const slicedAudioPaths = (chunkIndex: number) => [
+  chunkAudioSlicePath(chunkIndex),
+  "audio-chunks/frame.m4a",
+  "audio-chunks/layout.json",
+];
+
+function chunkAudioPaths(manifest: Readonly<PlanV2Manifest>, chunkIndex: number): string[] {
+  return listPlanV2ArtifactsForTarget(manifest, { role: "chunk", chunkIndex })
+    .map((artifact) => artifact.path)
+    .filter((path) => path.includes("audio"))
+    .sort();
+}
+
 describe("Plan v2 manifest", () => {
+  it("new reference-bearing plans pass the actual base reader and both legacy materializers", () => {
+    expect(sha256Hex(Buffer.from(legacySource))).toBe(
+      "3b78605ea3cc8331f2cf8e28d36b20f8ba486d283dc42b7a4104ad9849aedc4c",
+    );
+    const root = tempPath("hf-v2-old-reader-");
+    const v1 = createV1Plan(root);
+    const expected = { kind: "solid", rgb: [10, 46, 138] };
+    for (const relative of ["plan.json", "meta/composition.json"]) {
+      const path = join(v1, relative);
+      const value = JSON.parse(readFileSync(path, "utf8"));
+      value.reference_background = expected;
+      writeFileSync(path, JSON.stringify(value));
+    }
+    refreshV1PlanHash(v1);
+    const result = createPlanV2FromExecutionPlan(v1, join(root, "v2"));
+    expect(result.reference_background).toEqual(expected);
+    const manifest = legacyReader.readPlanV2Manifest(result.planDir);
+    expect(manifest.planHash).toBe(result.planHash);
+    expect(Object.hasOwn(manifest, "reference_background")).toBe(false);
+    for (const target of [{ role: "chunk", chunkIndex: 0 }, { role: "assembler" }]) {
+      const destination = join(root, `legacy-${target.role}`);
+      legacyReader.materializePlanV2Target(result.planDir, target, destination);
+      expect(
+        JSON.parse(readFileSync(join(destination, "plan.json"), "utf8")).reference_background,
+      ).toEqual(expected);
+      if (target.role === "chunk")
+        expect(
+          JSON.parse(readFileSync(join(destination, "meta/composition.json"), "utf8"))
+            .reference_background,
+        ).toEqual(expected);
+    }
+  });
+
   it("is deterministic without changing the manifest or result wire shapes", () => {
     const root = tempPath("hf-plan-v2-determinism-");
     const v1 = createV1Plan(root, { audio: true });
@@ -210,6 +280,7 @@ describe("Plan v2 manifest", () => {
     expect(first.planProtocol.schemaVersion).toBe(2);
     expect(first.limitations.videoDependencyMode).toBe("exact-rendered-frames");
     expect(Object.keys(first)).toEqual([
+      "reference_background",
       "planDir",
       "manifestPath",
       "planProtocol",
@@ -433,6 +504,24 @@ describe("Plan v2 manifest", () => {
     expect(assembler.some((artifact) => artifact.path === "audio.m4a")).toBe(false);
   });
 
+  it("sends each chunk only its own audio slice when the plan cut one per chunk", () => {
+    const root = tempPath("hf-plan-v2-chunk-audio-slices-");
+    const v1 = createV1Plan(root, { audio: true, chunksCarryAudio: true });
+    mkdirSync(join(v1, "audio-chunks"));
+    writeFileSync(join(v1, "audio-chunks", "frame.m4a"), "moov");
+    writeFileSync(join(v1, "audio-chunks", "layout.json"), "{}");
+    for (const chunkIndex of [0, 1]) {
+      writeFileSync(join(v1, chunkAudioSlicePath(chunkIndex)), `slice ${chunkIndex}`);
+    }
+    refreshV1PlanHash(v1);
+    const manifest = readPlanV2Manifest(createPlanV2FromV1(v1, join(root, "v2")).planDir);
+    for (const chunkIndex of [0, 1]) {
+      expect(chunkAudioPaths(manifest, chunkIndex)).toEqual(slicedAudioPaths(chunkIndex));
+    }
+    const assembler = listPlanV2ArtifactsForTarget(manifest, { role: "assembler" });
+    expect(assembler.some((artifact) => artifact.path.includes("audio"))).toBe(false);
+  });
+
   it("uses the runtime frame lookup to select exact video frames per chunk", () => {
     const root = tempPath("hf-plan-v2-video-reachability-");
     const result = createPlanV2FromV1(createV1Plan(root, { video: true }), join(root, "v2"));
@@ -470,20 +559,60 @@ describe("Plan v2 manifest", () => {
     );
   });
 
-  it("keeps a deferred source the page itself loads in every chunk", () => {
+  it("ships each compiled/ video source only to the chunks that show it", () => {
     const root = tempPath("hf-plan-v2-deferred-compiled-source-");
     const v1 = createV1Plan(root, {
       video: true,
       videoStart: 1 / 30,
       deferredSource: "compiled/hero.mp4",
     });
+    // A second clip shown in both chunks, also shipped from compiled/.
+    const videosPath = join(v1, "meta", "videos.json");
+    const videos = JSON.parse(readFileSync(videosPath, "utf-8")) as PlanVideosJson;
+    const hero = videos.extracted[0]!;
+    videos.videos.push({ ...videos.videos[0]!, id: "long", src: "long.mp4", start: 0 });
+    videos.extracted.push({
+      ...hero,
+      videoId: "long",
+      deferredRange: { ...hero.deferredRange!, sourcePath: "compiled/long.mp4" },
+    });
+    writeFileSync(videosPath, JSON.stringify(videos));
+    writeFileSync(join(v1, "compiled", "long.mp4"), "long source video");
+    refreshV1PlanHash(v1);
     const manifest = readPlanV2Manifest(createPlanV2FromV1(v1, join(root, "v2")).planDir);
+    const chunksOf = (path: string) =>
+      manifest.artifacts.find((artifact) => artifact.path === path)?.chunks;
 
     expect(manifest.limitations.videoDependencyMode).toBe("source-extract");
-    for (const chunkIndex of [0, 1]) {
-      const artifacts = listPlanV2ArtifactsForTarget(manifest, { role: "chunk", chunkIndex });
-      expect(artifacts.some((artifact) => artifact.path === "compiled/hero.mp4")).toBe(true);
-    }
+    expect(chunksOf("compiled/hero.mp4")).toEqual([1]);
+    expect(chunksOf("compiled/long.mp4")).toEqual([0, 1]);
+    expect(chunksOf("compiled/index.html")).toBe("all");
+    expect(chunksOf("compiled/asset.txt")).toBe("all");
+
+    const chunk0Dir = join(root, "chunk-0");
+    materializePlanV2Target(join(root, "v2"), { role: "chunk", chunkIndex: 0 }, chunk0Dir);
+    expect(existsSync(join(chunk0Dir, "compiled", "hero.mp4"))).toBe(false);
+    expect(existsSync(join(chunk0Dir, "compiled", "long.mp4"))).toBe(true);
+    expect(validatePlanV2MaterializedTarget(chunk0Dir, { role: "chunk", chunkIndex: 0 })).not.toBe(
+      null,
+    );
+
+    // A source read by URL is neither verified locally nor copied, and is recorded for the chunk.
+    const longDigest = manifest.artifacts.find((a) => a.path === "compiled/long.mp4")!.sha256;
+    rmSync(planV2BlobPath(join(root, "v2"), longDigest));
+    const remoteSources = { "compiled/long.mp4": "https://example.test/long.mp4" };
+    const byUrlDir = join(root, "chunk-0-by-url");
+    const chunk0 = { role: "chunk", chunkIndex: 0 } as const;
+    materializePlanV2Target(join(root, "v2"), chunk0, byUrlDir, { remoteSources });
+    expect(existsSync(join(byUrlDir, "compiled", "long.mp4"))).toBe(false);
+    expect(readValidatedPlanV2Materialization(byUrlDir, chunk0)?.remoteSources).toEqual(
+      remoteSources,
+    );
+    expect(() =>
+      materializePlanV2Target(join(root, "v2"), chunk0, join(root, "chunk-0-stray"), {
+        remoteSources: { "compiled/index.html": "https://example.test/index.html" },
+      }),
+    ).toThrow(/not a selected deferred video/);
   });
 
   it("rejects a deferred video source outside the plan directory", () => {
@@ -648,13 +777,13 @@ describe("Plan v2 manifest", () => {
     });
   }
 
-  it("rejects an extracted video identifier that escapes the video-frame root", () => {
+  it("reads an extracted video identifier with parent segments only inside the video-frame root", () => {
     const root = tempPath("hf-plan-v2-unsafe-video-id-");
     const v1 = createV1Plan(root, { video: true, videoId: "../escape" });
+    const frameRoot = join(v1, "video-frames", mediaIdPathSegment("../escape"));
 
-    expect(() => createPlanV2FromV1(v1, join(root, "v2"))).toThrow(
-      'unsafe extracted video id: "../escape"',
-    );
+    expect(() => createPlanV2FromV1(v1, join(root, "v2"))).toThrow(frameRoot);
+    expect(existsSync(join(v1, "escape"))).toBe(false);
   });
 
   it("falls back to the full source frame pack when video metadata is absent", () => {
@@ -876,35 +1005,39 @@ describe("Plan v2 artifact publisher", () => {
     });
   });
 
-  it("falls back to an atomic copy when hard-linking is unavailable", async () => {
-    const root = tempPath("hf-plan-v2-publisher-copy-");
-    const v1 = createV1Plan(root);
-    const destination = join(root, "v2");
-    const publisher = new LocalPlanV2ArtifactPublisher(destination, {
-      linkFile() {
-        throw Object.assign(new Error("cross-device link"), { code: "EXDEV" });
-      },
-    });
-    const manifest = await publishPlanV2FromV1(v1, publisher);
-    const artifact = manifest.artifacts.find(
-      (candidate) => candidate.path === "compiled/asset.txt",
-    );
-    if (artifact === undefined) throw new Error("test fixture is missing compiled/asset.txt");
-    const sourcePath = join(v1, artifact.path);
-    const blobPath = join(
-      destination,
-      "artifacts",
-      "sha256",
-      artifact.sha256.slice(0, 2),
-      artifact.sha256,
-    );
+  // fails without the fix: EISDIR (Windows on a Google Drive folder) failed the publish instead of copying.
+  it.each(["EXDEV", "EISDIR", "ENOSYS", "EOPNOTSUPP"])(
+    "falls back to an atomic copy when hard-linking fails with %s",
+    async (code) => {
+      const root = tempPath("hf-plan-v2-publisher-copy-");
+      const v1 = createV1Plan(root);
+      const destination = join(root, "v2");
+      const publisher = new LocalPlanV2ArtifactPublisher(destination, {
+        linkFile() {
+          throw Object.assign(new Error("hard links are not supported"), { code });
+        },
+      });
+      const manifest = await publishPlanV2FromV1(v1, publisher);
+      const artifact = manifest.artifacts.find(
+        (candidate) => candidate.path === "compiled/asset.txt",
+      );
+      if (artifact === undefined) throw new Error("test fixture is missing compiled/asset.txt");
+      const sourcePath = join(v1, artifact.path);
+      const blobPath = join(
+        destination,
+        "artifacts",
+        "sha256",
+        artifact.sha256.slice(0, 2),
+        artifact.sha256,
+      );
 
-    expect(readFileSync(blobPath)).toEqual(readFileSync(sourcePath));
-    expect({ dev: statSync(blobPath).dev, ino: statSync(blobPath).ino }).not.toEqual({
-      dev: statSync(sourcePath).dev,
-      ino: statSync(sourcePath).ino,
-    });
-  });
+      expect(readFileSync(blobPath)).toEqual(readFileSync(sourcePath));
+      expect({ dev: statSync(blobPath).dev, ino: statSync(blobPath).ino }).not.toEqual({
+        dev: statSync(sourcePath).dev,
+        ino: statSync(sourcePath).ino,
+      });
+    },
+  );
 
   it("produces byte-identical local CAS output through both publication paths", async () => {
     const root = tempPath("hf-plan-v2-publisher-parity-");
@@ -1126,6 +1259,39 @@ describe("Plan v2 planning", () => {
           ...["freeze", "publication", "upload", "manifest"],
         ]),
       );
+    },
+    60_000,
+  );
+
+  it.skipIf(!HAS_FFMPEG)(
+    "cuts the audio into one slice per chunk when chunks carry their audio",
+    async () => {
+      const root = tempPath("hf-plan-v2-audio-slices-");
+      const projectDir = join(root, "project");
+      mkdirSync(projectDir);
+      // 2.1 s is not a whole number of 1024-sample AAC frames.
+      const tone = spawnSync("ffmpeg", [
+        ...["-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"],
+        ...["-t", "2.1", "-c:a", "pcm_s16le", join(projectDir, "tone.wav")],
+      ]);
+      expect(tone.status).toBe(0);
+      writeFileSync(
+        join(projectDir, "index.html"),
+        `<!doctype html><html><head><meta charset="utf-8"></head><body>
+  <div data-composition-id="root" data-width="320" data-height="240" data-duration="2.1">
+    <audio id="tone" src="tone.wav" data-start="0" data-duration="2.1"></audio><p>slices</p>
+  </div></body></html>`,
+      );
+      const manifest = await planV2WithPublisher(
+        projectDir,
+        { fps: 30, width: 320, height: 240, format: "mp4", chunkSize: 30 },
+        new LocalPlanV2ArtifactPublisher(join(root, "v2")),
+        { stagingParentDir: root, chunksCarryAudio: true },
+      );
+      expect(manifest.chunkCount).toBe(3);
+      for (const chunkIndex of [0, 1, 2]) {
+        expect(chunkAudioPaths(manifest, chunkIndex)).toEqual(slicedAudioPaths(chunkIndex));
+      }
     },
     60_000,
   );

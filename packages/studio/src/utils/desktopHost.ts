@@ -67,7 +67,7 @@ export interface DesktopHost {
   exports: {
     /** Asks where the export goes; null when the person cancels. The id is valid for one save. */
     choose: (request: {
-      format: "mp4" | "mov" | "webm";
+      format: "mp4" | "mov" | "webm" | "gif";
       suffix?: string;
     }) => Promise<{ id: string; path: string } | null>;
     /** Copies a finished render to its chosen place; null when it failed (the app says why). */

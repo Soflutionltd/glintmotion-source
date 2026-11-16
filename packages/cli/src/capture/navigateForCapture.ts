@@ -1,9 +1,33 @@
-import { TimeoutError, type CDPSession, type HTTPResponse, type Page } from "puppeteer-core";
-import { isNavigationTimeoutError, withRemainingBudget } from "./captureTimeout.js";
+import type { CDPSession, HTTPResponse, Page } from "puppeteer-core";
+import { gsapCdnDist } from "@hyperframes/core/gsap-cdn";
+import { bundledGsapFor } from "../server/gsapVendor.js";
+import {
+  isDegradableEvaluateTimeoutError,
+  isNavigationTimeoutError,
+  withRemainingBudget,
+} from "./captureTimeout.js";
 
 export { isNavigationTimeoutError };
 
 export const NETWORK_IDLE_ATTEMPT_MS = 30_000;
+
+const PROXY_FAILURES = {
+  "net::ERR_TUNNEL_CONNECTION_FAILED": (host: string) =>
+    `Your network's proxy refused the connection to ${host}. Ask whoever runs it to allow ${host}.`,
+  "net::ERR_PROXY_CONNECTION_FAILED": () =>
+    "Could not reach your network's proxy. Check the proxy address and that the proxy is running, or ask whoever runs it.",
+  "net::ERR_ABORTED": (host: string) =>
+    `${host} stopped loading as a page. This usually means the URL is a file download such as a font, not a web page. Capture a page that uses the file; its fonts are saved to assets/fonts.`,
+} as const;
+const PROXY_FAILURE = new RegExp(Object.keys(PROXY_FAILURES).join("|"));
+
+export function explainProxyRefusal(err: unknown, url: string): unknown {
+  const said = err instanceof Error ? err.message : String(err);
+  const code = PROXY_FAILURE.exec(said)?.[0] as keyof typeof PROXY_FAILURES | undefined;
+  if (!code) return err;
+  const host = URL.canParse(url) ? new URL(url).host : "the site";
+  return new Error(`${PROXY_FAILURES[code](host)} (${code})`, { cause: err });
+}
 
 export type CaptureGotoWaitUntil = "networkidle2" | "domcontentloaded";
 
@@ -46,21 +70,102 @@ export async function navigateForCapture<TResponse>(
     };
   } catch (err) {
     if (!isNavigationTimeoutError(err) || networkIdleTimeoutMs >= totalTimeoutMs) {
-      throw err;
+      throw explainProxyRefusal(err, url);
     }
   }
 
   const fallbackTimeoutMs = totalTimeoutMs - networkIdleTimeoutMs;
-  const response = await page.goto(url, {
-    waitUntil: "domcontentloaded",
-    timeout: fallbackTimeoutMs,
-  });
+  const response = await page
+    .goto(url, { waitUntil: "domcontentloaded", timeout: fallbackTimeoutMs })
+    .catch((err: unknown) => {
+      throw explainProxyRefusal(err, url);
+    });
   return {
     response,
     waitUntil: "domcontentloaded",
     networkIdleTimeoutMs,
     fellBackFromNetworkIdle: true,
   };
+}
+
+export interface PageReadyPage {
+  waitForNetworkIdle?(options: {
+    idleTime: number;
+    timeout: number;
+    concurrency?: number;
+  }): Promise<unknown>;
+  evaluate(fn: () => unknown): Promise<unknown>;
+}
+
+export interface WaitForPageReadyOptions {
+  timeoutMs?: number;
+  networkIdle?: "always" | "after-load";
+}
+
+export async function waitForPageReady(
+  page: PageReadyPage,
+  options: WaitForPageReadyOptions = {},
+): Promise<void> {
+  const { timeoutMs = 15_000, networkIdle = "always" } = options;
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadline - Date.now());
+  const idle = async () => {
+    try {
+      await page.waitForNetworkIdle?.({
+        idleTime: 500,
+        timeout: remaining(),
+        concurrency: 2,
+      });
+    } catch {}
+  };
+
+  if (networkIdle === "always" && remaining() > 0) await idle();
+
+  let waitedOutLoad = false;
+  while (remaining() > 0) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loading = await Promise.race([
+      page
+        .evaluate(() => document.readyState === "loading")
+        .catch((err: unknown) => {
+          if (isDegradableEvaluateTimeoutError(err)) throw err;
+          return true;
+        }),
+      new Promise<true>((resolve) => {
+        timer = setTimeout(() => resolve(true), Math.max(1, remaining()));
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+    if (loading !== true) break;
+    waitedOutLoad = true;
+    if (remaining() > 0) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, remaining())));
+    }
+  }
+
+  if (waitedOutLoad && remaining() > 0) await idle();
+}
+
+function isNavigationRaceError(error: unknown): boolean {
+  return error instanceof Error && /Execution context was destroyed/i.test(error.message);
+}
+
+export function settleAcrossNavigation(page: Page): Page {
+  const read = page.evaluate.bind(page);
+  page.evaluate = (async (...args: Parameters<Page["evaluate"]>) => {
+    try {
+      return await read(...args);
+    } catch (error) {
+      if (!isNavigationRaceError(error)) throw error;
+      await waitForPageReady({
+        evaluate: (fn) => read(fn),
+        waitForNetworkIdle: (o) => page.waitForNetworkIdle(o),
+      });
+      return read(...args);
+    }
+  }) as Page["evaluate"];
+  return page;
 }
 
 const PUPPETEER_LAUNCH_DEFAULT_TIMEOUT_MS = 30_000;
@@ -71,15 +176,39 @@ const SENT_OR_ANSWERED_WITHOUT_NETWORK = [
   "Network.responseReceived",
 ] as const;
 
+async function serveBundledGsap(cdp: CDPSession): Promise<void> {
+  cdp.on("Fetch.requestPaused", ({ requestId, request }) => {
+    const bundled = bundledGsapFor(request.url);
+    void (
+      bundled
+        ? cdp.send("Fetch.fulfillRequest", {
+            requestId,
+            responseCode: 200,
+            responseHeaders: [
+              { name: "Content-Type", value: bundled.contentType },
+              { name: "Access-Control-Allow-Origin", value: "*" },
+            ],
+            body: bundled.body.toString("base64"),
+          })
+        : cdp.send("Fetch.continueRequest", { requestId })
+    ).catch(() => undefined);
+  });
+  await cdp.send("Fetch.enable", {
+    patterns: [{ urlPattern: `${gsapCdnDist()}*`, requestStage: "Request" }],
+  });
+}
+
 export async function gotoWhenSent(
   page: Page,
   url: string,
   timeoutMs: number,
   coldChromeFirstRequestTimeoutMs = PUPPETEER_LAUNCH_DEFAULT_TIMEOUT_MS,
 ): Promise<HTTPResponse | null> {
+  const { TimeoutError } = await import("puppeteer-core");
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable");
+    await serveBundledGsap(cdp);
     const sent = documentRequestSent(cdp);
     const unfinished = unfinishedPageLoadRequests(cdp);
     const navigation = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });

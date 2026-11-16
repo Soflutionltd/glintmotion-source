@@ -39,7 +39,12 @@ import { loadMcpToken, startMcpServer } from "./mcp.mjs";
 import { cancelSimulatorTake } from "./takes.mjs";
 import { BUNDLED_FFMPEG_DIR, createKeyStore, deliverRender, generateMusic } from "./media.mjs";
 import { probeMotion } from "./motion-probe.mjs";
-import { analyzeReference, REFERENCE_DIR, referencePrompt, writeReferenceProject } from "./reference.mjs";
+import {
+  analyzeReference,
+  REFERENCE_DIR,
+  referencePrompt,
+  writeReferenceProject,
+} from "./reference.mjs";
 import { createRenderJobs } from "./render-jobs.mjs";
 import { installSkills, skillsStatus } from "./skills-install.mjs";
 import { CLI_COMMANDS } from "./agent-tools.mjs";
@@ -80,10 +85,20 @@ const STUDIO_PORT = 47_831;
 app.setName(APP_NAME);
 
 const engineEntry = app.isPackaged
-  ? join(process.resourcesPath, "engine", "node_modules", "@hyperframes", "cli", "bin", "hyperframes.mjs")
+  ? join(
+      process.resourcesPath,
+      "engine",
+      "node_modules",
+      "@hyperframes",
+      "cli",
+      "bin",
+      "hyperframes.mjs",
+    )
   : join(here, "..", "..", "packages", "cli", "bin", "hyperframes.mjs");
 const cliBinDir = app.isPackaged ? join(process.resourcesPath, "bin") : join(here, "bin");
-const skillsDir = app.isPackaged ? join(process.resourcesPath, "skills") : join(here, "..", "..", "skills");
+const skillsDir = app.isPackaged
+  ? join(process.resourcesPath, "skills")
+  : join(here, "..", "..", "skills");
 const CLI_LINK = join(homedir(), ".local", "bin", "glintmotion");
 const SKILL_TARGETS = [join(homedir(), ".claude", "skills"), join(homedir(), ".cursor", "skills")];
 
@@ -95,7 +110,12 @@ const bundledChrome = app.isPackaged
 
 const engineEnv = {
   ...process.env,
-  PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH ?? "/usr/bin:/bin", BUNDLED_FFMPEG_DIR].join(":"),
+  PATH: [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    process.env.PATH ?? "/usr/bin:/bin",
+    BUNDLED_FFMPEG_DIR,
+  ].join(":"),
   ELECTRON_RUN_AS_NODE: "1",
   HYPERFRAMES_NO_TELEMETRY: "1",
   HYPERFRAMES_NO_UPDATE_CHECK: "1",
@@ -105,7 +125,12 @@ const engineEnv = {
   NO_COLOR: "1",
 };
 // A browser the person chose stays theirs; otherwise the build shipped with the app.
-if (bundledChrome && existsSync(bundledChrome) && !engineEnv.HYPERFRAMES_BROWSER_PATH && !engineEnv.PRODUCER_HEADLESS_SHELL_PATH) {
+if (
+  bundledChrome &&
+  existsSync(bundledChrome) &&
+  !engineEnv.HYPERFRAMES_BROWSER_PATH &&
+  !engineEnv.PRODUCER_HEADLESS_SHELL_PATH
+) {
   engineEnv.HYPERFRAMES_BROWSER_PATH = bundledChrome;
 }
 
@@ -204,7 +229,10 @@ async function openStudio(dir, hash = "") {
   stopStudio();
   rendererBusy = false;
   const port = await freePort(STUDIO_PORT);
-  const child = runEngine(["preview", dir, "--no-open", "--foreground", "--force-new", "--port", String(port)], dir);
+  const child = runEngine(
+    ["preview", dir, "--no-open", "--foreground", "--force-new", "--port", String(port)],
+    dir,
+  );
   studio = { child, dir, url: null };
 
   const url = await new Promise((resolve, reject) => {
@@ -252,7 +280,15 @@ function createProject({ name, parent, resolution }) {
 
   return new Promise((resolve, reject) => {
     const preset = resolution === "post" ? "portrait" : resolution;
-    const args = ["init", safeName, "--example", "blank", "--non-interactive", "--resolution", preset];
+    const args = [
+      "init",
+      safeName,
+      "--example",
+      "blank",
+      "--non-interactive",
+      "--resolution",
+      preset,
+    ];
     const child = runEngine(args, parent);
     let output = "";
     child.stdout.on("data", (c) => (output += c));
@@ -269,9 +305,7 @@ function createProject({ name, parent, resolution }) {
   });
 }
 
-ipcMain.handle("projects:list", () =>
-  readRecents().map((r) => projectInfo(r.path, r.openedAt)),
-);
+ipcMain.handle("projects:list", () => readRecents().map((r) => projectInfo(r.path, r.openedAt)));
 ipcMain.handle("projects:defaultParent", () => DEFAULT_PROJECTS_DIR);
 ipcMain.handle("projects:pickFolder", async (_event, purpose) => {
   const result = await dialog.showOpenDialog(win, {
@@ -305,7 +339,10 @@ async function startFromTemplate(request) {
   mkdirSync(parent, { recursive: true });
   const variables = request?.series === true ? readVariables(source) : [];
   if (variables.length > 0) {
-    const dir = join(parent, projectNameFor({ site: null, idea: `${basename(source)} série`, parent }));
+    const dir = join(
+      parent,
+      projectNameFor({ site: null, idea: `${basename(source)} série`, parent }),
+    );
     copyTemplate(source, dir);
     pendingPrompts.set(dir, seriesPrompt(basename(source), briefs, variables));
     await openStudio(dir);
@@ -323,11 +360,15 @@ async function startFromTemplate(request) {
 
 /** A series project written straight from rows of variable values (an agent's glintmotion_create_series). */
 function createSeriesFromRows({ template, rows, name }) {
-  const source = readTemplates(templatesFile()).find((dir) => dir === template || basename(dir) === template);
+  const source = readTemplates(templatesFile()).find(
+    (dir) => dir === template || basename(dir) === template,
+  );
   if (!source) throw new Error(`No template "${template}". glintmotion_list_templates lists them.`);
   const variables = readVariables(source);
   if (variables.length === 0) {
-    throw new Error(`${basename(source)} declares no data-composition-variables, so a series cannot vary it.`);
+    throw new Error(
+      `${basename(source)} declares no data-composition-variables, so a series cannot vary it.`,
+    );
   }
   checkSeriesRows(rows);
   const parent = DEFAULT_PROJECTS_DIR;
@@ -348,7 +389,11 @@ async function startFromHome(request) {
   const prompt = request?.picks ? firstVideoPrompt({ picks: request.picks, ...source }) : text;
   if (!prompt) throw new Error("Décris la vidéo que tu veux.");
   const parent = DEFAULT_PROJECTS_DIR;
-  const dir = await createProject({ name: projectNameFor({ ...source, parent }), parent, resolution });
+  const dir = await createProject({
+    name: projectNameFor({ ...source, parent }),
+    parent,
+    resolution,
+  });
   pendingPrompts.set(dir, prompt);
   await openStudio(dir);
 }
@@ -360,7 +405,9 @@ function runEngineCaptured(args, cwd) {
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
     child.stderr.on("data", (c) => (stderr += c));
-    child.on("error", (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message}` }));
+    child.on("error", (error) =>
+      resolve({ code: -1, stdout, stderr: `${stderr}${error.message}` }),
+    );
     child.on("exit", (code) => resolve({ code, stdout, stderr }));
   });
 }
@@ -384,9 +431,16 @@ async function startFromReference(source) {
     const sheet = join(work, "shots.jpg");
     const runBeats = (dir) => runEngineCaptured(["beats", "--json"], dir);
     const analysis = await analyzeReference({ file, sheet, runBeats });
-    if (analysis.shotCount < 2) throw new Error("Aucune coupe trouvée dans cette vidéo : il n'y a pas de montage à reprendre.");
+    if (analysis.shotCount < 2)
+      throw new Error(
+        "Aucune coupe trouvée dans cette vidéo : il n'y a pas de montage à reprendre.",
+      );
     const parent = DEFAULT_PROJECTS_DIR;
-    const name = projectNameFor({ site: null, idea: `Remake ${basename(file, extname(file))}`, parent });
+    const name = projectNameFor({
+      site: null,
+      idea: `Remake ${basename(file, extname(file))}`,
+      parent,
+    });
     const resolution = analysis.resolution;
     const dir = await createProject({ name, parent, resolution });
     const built = await writeReferenceProject({ dir, analysis, resolution, title: name });
@@ -410,10 +464,13 @@ ipcMain.handle("templates:set", (_event, request) =>
 ipcMain.handle("templates:use", (_event, request) => startFromTemplate(request));
 function knownProject(dir) {
   const path = String(dir ?? "");
-  if (!readRecents().some((recent) => recent.path === path)) throw new Error("Ce projet n'est plus dans la liste.");
+  if (!readRecents().some((recent) => recent.path === path))
+    throw new Error("Ce projet n'est plus dans la liste.");
   return path;
 }
-ipcMain.handle("series:export", (_event, dir) => renders.start(knownProject(dir), { series: true }));
+ipcMain.handle("series:export", (_event, dir) =>
+  renders.start(knownProject(dir), { series: true }),
+);
 ipcMain.handle("series:status", (_event, dir) => renders.latestFor(knownProject(dir)));
 ipcMain.handle("series:reveal", (_event, dir) => {
   const first = renders.latestFor(knownProject(dir))?.outputs?.[0];
@@ -455,7 +512,10 @@ const AGENT_ALLOWED_TOOLS = [
   "Bash(glintmotion capture *)",
   "mcp__glintmotion__*",
   "mcp__higgsfield__*",
-  ...CLI_COMMANDS.flatMap((command) => [`Bash(glintmotion ${command})`, `Bash(glintmotion ${command} *)`]),
+  ...CLI_COMMANDS.flatMap((command) => [
+    `Bash(glintmotion ${command})`,
+    `Bash(glintmotion ${command} *)`,
+  ]),
 ];
 
 // Switching project would kill the agent; exporting, publishing and paid music stay with the person.
@@ -480,10 +540,16 @@ const higgsfield = createHiggsfieldAccount({
 async function agentMcpArgs() {
   if (!mcp || mcp.error) return [];
   const file = join(app.getPath("userData"), "agent-mcp.json");
-  const servers = { glintmotion: { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } } };
+  const servers = {
+    glintmotion: { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` } },
+  };
   const higgsfieldToken = await higgsfield.accessToken();
   if (higgsfieldToken) {
-    servers.higgsfield = { type: "http", url: HIGGSFIELD_MCP_URL, headers: { Authorization: `Bearer ${higgsfieldToken}` } };
+    servers.higgsfield = {
+      type: "http",
+      url: HIGGSFIELD_MCP_URL,
+      headers: { Authorization: `Bearer ${higgsfieldToken}` },
+    };
   }
   writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
   chmodSync(file, 0o600);
@@ -594,14 +660,22 @@ async function installClaude() {
   if (response !== 0) return;
   await runClaudeCommand(
     "/bin/bash",
-    ["-c", `set -o pipefail; curl -q --proto =https --proto-redir =https -fsSL ${CLAUDE_INSTALL_URL} | bash`],
+    [
+      "-c",
+      `set -o pipefail; curl -q --proto =https --proto-redir =https -fsSL ${CLAUDE_INSTALL_URL} | bash`,
+    ],
     ACCOUNT_TIMEOUT_MS,
     "L'installation de Claude Code a échoué.",
   );
 }
 
 const login = () =>
-  runClaudeCommand(findClaude(), ["auth", "login"], ACCOUNT_TIMEOUT_MS, "La connexion à Claude n'a pas abouti.");
+  runClaudeCommand(
+    findClaude(),
+    ["auth", "login"],
+    ACCOUNT_TIMEOUT_MS,
+    "La connexion à Claude n'a pas abouti.",
+  );
 const logout = () =>
   runClaudeCommand(findClaude(), ["auth", "logout"], 30_000, "La déconnexion de Claude a échoué.");
 
@@ -612,7 +686,8 @@ async function confirmLogout() {
     defaultId: 1,
     cancelId: 1,
     message: "Se déconnecter de Claude ?",
-    detail: "Claude Code est déconnecté sur tout le Mac, y compris dans le terminal et les autres apps qui l'utilisent.",
+    detail:
+      "Claude Code est déconnecté sur tout le Mac, y compris dans le terminal et les autres apps qui l'utilisent.",
   });
   return response === 0;
 }
@@ -650,13 +725,16 @@ function forwardAgentLine(line, dir) {
   if (message.session_id) agentSessions.set(dir, message.session_id);
   if (message.type === "assistant") {
     for (const block of message.message?.content ?? []) {
-      if (block.type === "text" && block.text.trim()) sendAgentEvent({ kind: "text", text: block.text });
+      if (block.type === "text" && block.text.trim())
+        sendAgentEvent({ kind: "text", text: block.text });
       if (block.type === "tool_use") {
         const input = block.input ?? {};
         const target = input.file_path ?? input.path ?? input.pattern ?? input.command ?? "";
         sendAgentEvent({
           kind: "tool",
-          name: block.name.replace(/^mcp__glintmotion__/, "").replace(/^mcp__higgsfield__/, "higgsfield · "),
+          name: block.name
+            .replace(/^mcp__glintmotion__/, "")
+            .replace(/^mcp__higgsfield__/, "higgsfield · "),
           target: String(target).replace(`${dir}/`, ""),
         });
       }
@@ -726,8 +804,16 @@ async function startAgent({ prompt, model }) {
     agentRun = null;
     if (finished) return;
     const error =
-      signal === "SIGTERM" ? null : `Claude Code s'est arrêté (code ${code}). ${stderr.slice(-400)}`.trim();
-    sendAgentEvent({ kind: "done", error, stopped: signal === "SIGTERM", costUsd: null, durationMs: null });
+      signal === "SIGTERM"
+        ? null
+        : `Claude Code s'est arrêté (code ${code}). ${stderr.slice(-400)}`.trim();
+    sendAgentEvent({
+      kind: "done",
+      error,
+      stopped: signal === "SIGTERM",
+      costUsd: null,
+      durationMs: null,
+    });
   });
 }
 
@@ -735,7 +821,10 @@ const renders = createRenderJobs({
   // The studio extracts an idle project's video frames ahead of time; an export in its own
   // process would extract them a second time alongside, so the studio stops first.
   runEngine: (args, cwd) => {
-    if (studio?.url) fetch(new URL("/api/export-preparation/pause", studio.url), { method: "POST" }).catch(() => {});
+    if (studio?.url)
+      fetch(new URL("/api/export-preparation/pause", studio.url), { method: "POST" }).catch(
+        () => {},
+      );
     return runEngine(args, cwd);
   },
   workerMemory: createPersistentMap(join(app.getPath("userData"), "render-workers.json")),
@@ -743,11 +832,16 @@ const renders = createRenderJobs({
 
 let motionRun = null;
 async function checkMotion(request) {
-  if (!studio?.url) throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
+  if (!studio?.url)
+    throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
   if (motionRun) throw new Error("A motion check is already running. Wait for it to finish.");
   const info = projectInfo(studio.dir, null);
-  if (!info.width || !info.height) throw new Error("index.html has no data-width/data-height on its root.");
-  const url = new URL(`/api/projects/${encodeURIComponent(basename(studio.dir))}/preview?hf-capture=1`, studio.url);
+  if (!info.width || !info.height)
+    throw new Error("index.html has no data-width/data-height on its root.");
+  const url = new URL(
+    `/api/projects/${encodeURIComponent(basename(studio.dir))}/preview?hf-capture=1`,
+    studio.url,
+  );
   motionRun = probeMotion({ url: url.href, width: info.width, height: info.height, ...request });
   try {
     return await motionRun;
@@ -759,7 +853,8 @@ async function checkMotion(request) {
 function startMcp() {
   const token = loadMcpToken(join(app.getPath("userData"), "mcp-token"));
   const agentProjectDir = () => {
-    if (!studio) throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
+    if (!studio)
+      throw new Error("No project is open in Glintmotion. Call glintmotion_open_project first.");
     return studio.dir;
   };
   const server = startMcpServer({
@@ -777,11 +872,13 @@ function startMcp() {
       renders,
       motionProbe: checkMotion,
       generateMusic: composeMusic,
-      deliver: (request) => trackDelivery(deliverRender({ projectDir: agentProjectDir(), ...request })),
+      deliver: (request) =>
+        trackDelivery(deliverRender({ projectDir: agentProjectDir(), ...request })),
       createProject,
       defaultParent: DEFAULT_PROJECTS_DIR,
       effectsCacheFile: join(app.getPath("userData"), "effects-catalog.json"),
-      listTemplates: () => listTemplates().map((info) => ({ ...info, variables: readVariables(info.path) })),
+      listTemplates: () =>
+        listTemplates().map((info) => ({ ...info, variables: readVariables(info.path) })),
       createSeries: createSeriesFromRows,
     },
   });
@@ -844,7 +941,11 @@ ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());
 ipcMain.handle("skills:status", () => skillsStatus(skillsDir, SKILL_TARGETS));
 ipcMain.handle("skills:install", () =>
-  installSkills(skillsDir, SKILL_TARGETS, new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")),
+  installSkills(
+    skillsDir,
+    SKILL_TARGETS,
+    new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-"),
+  ),
 );
 ipcMain.handle("mcp:info", () => mcp);
 ipcMain.handle("mcp:copy", (_event, value) => clipboard.writeText(String(value)));
@@ -889,7 +990,12 @@ async function composeMusic(request) {
 }
 ipcMain.handle("music:generate", (_event, request) => composeMusic(request));
 ipcMain.handle("motion:check", () => checkMotion({}));
-const EXPORT_KINDS = { mp4: "Vidéo MP4", mov: "Vidéo QuickTime", webm: "Vidéo WebM" };
+const EXPORT_KINDS = {
+  mp4: "Vidéo MP4",
+  mov: "Vidéo QuickTime",
+  webm: "Vidéo WebM",
+  gif: "GIF animé",
+};
 /** project dir -> folder its last export went to. */
 const exportDirs = createPersistentMap(join(app.getPath("userData"), "export-dirs.json"));
 /** One-use id -> path the person picked; the studio never names a destination itself. */
@@ -904,7 +1010,10 @@ async function chooseExportTarget(request) {
   const result = await dialog.showSaveDialog(win, {
     title: "Où enregistrer l'export ?",
     buttonLabel: "Exporter",
-    defaultPath: join(existsSync(folder) ? folder : homedir(), `${basename(projectDir)}${suffix}.${format}`),
+    defaultPath: join(
+      existsSync(folder) ? folder : homedir(),
+      `${basename(projectDir)}${suffix}.${format}`,
+    ),
     filters: [{ name: EXPORT_KINDS[format], extensions: [format] }],
     properties: ["createDirectory", "showOverwriteConfirmation"],
   });
@@ -925,7 +1034,11 @@ function takeExportTarget(id) {
 function announceExport(path) {
   savedExports.add(path);
   if (Notification.isSupported()) {
-    const notice = new Notification({ title: "Export enregistré", body: basename(path), silent: true });
+    const notice = new Notification({
+      title: "Export enregistré",
+      body: basename(path),
+      silent: true,
+    });
     notice.on("click", () => shell.showItemInFolder(path));
     notice.show();
   }
@@ -963,14 +1076,19 @@ async function exportImage(request) {
   });
   if (result.canceled || !result.filePath) return null;
   const png = extname(result.filePath).toLowerCase() === ".png";
-  const path = png || /\.jpe?g$/i.test(result.filePath) ? result.filePath : `${result.filePath}.jpg`;
+  const path =
+    png || /\.jpe?g$/i.test(result.filePath) ? result.filePath : `${result.filePath}.jpg`;
   exportDirs.set(projectDir, dirname(path));
 
   const encoded = composition.split("/").map(encodeURIComponent).join("/");
-  const url = new URL(`/api/projects/${encodeURIComponent(basename(projectDir))}/thumbnail/${encoded}`, studio.url);
+  const url = new URL(
+    `/api/projects/${encodeURIComponent(basename(projectDir))}/thumbnail/${encoded}`,
+    studio.url,
+  );
   url.search = new URLSearchParams({ t: String(time), format: "png", output: "source" }).toString();
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Le studio n'a pas pu capturer l'image (HTTP ${response.status}).`);
+  if (!response.ok)
+    throw new Error(`Le studio n'a pas pu capturer l'image (HTTP ${response.status}).`);
   const frame = Buffer.from(await response.arrayBuffer());
   if (png) {
     await writeFile(path, frame);
@@ -988,7 +1106,8 @@ async function saveExport(request) {
     const target = takeExportTarget(request?.id);
     const name = basename(String(request?.filename ?? ""));
     const source = join(target.projectDir, "renders", name);
-    if (!name || name !== request.filename || !existsSync(source)) throw new Error(`Rendu introuvable : ${name}`);
+    if (!name || name !== request.filename || !existsSync(source))
+      throw new Error(`Rendu introuvable : ${name}`);
     return await copyToTarget(source, target);
   } catch (error) {
     await dialog.showMessageBox(win ?? undefined, {
@@ -1042,7 +1161,8 @@ const PREPARE_TIMEOUT_MS = 8_000;
 
 /** Lets the studio write its pending edits to disk; a studio that never answers is not waited on forever. */
 function prepareStudio() {
-  if (!win || !studio?.url || !win.webContents.getURL().startsWith(studio.url)) return Promise.resolve();
+  if (!win || !studio?.url || !win.webContents.getURL().startsWith(studio.url))
+    return Promise.resolve();
   const id = `${Date.now()}`;
   return new Promise((resolve) => {
     const done = (_event, answered) => {
@@ -1061,8 +1181,9 @@ const updater = createUpdater({
   updater: autoUpdater,
   enabled: app.isPackaged,
   isBusy: () =>
-    Boolean(agentRun || motionRun || musicRunning || accountRun || deliveries > 0 || rendererBusy) ||
-    renders.list().some((job) => job.status === "running"),
+    Boolean(
+      agentRun || motionRun || musicRunning || accountRun || deliveries > 0 || rendererBusy,
+    ) || renders.list().some((job) => job.status === "running"),
   idleSeconds: () => powerMonitor.getSystemIdleTime(),
   prepareRestart: async () => {
     await prepareStudio();
@@ -1070,7 +1191,8 @@ const updater = createUpdater({
     writeResume(resumeFile(), { dir: studio?.dir ?? null, hash: url ? new URL(url).hash : "" });
   },
   onState: (state) => {
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send("updates:state", state);
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send("updates:state", state);
   },
 });
 ipcMain.handle("updates:state", () => updater.state());
@@ -1127,11 +1249,13 @@ function buildMenu() {
       submenu: [
         {
           label: "Quoi de neuf dans Glintmotion",
-          click: () => whatsNew.showAll().catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
+          click: () =>
+            whatsNew.showAll().catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
         },
         {
           label: "Visite guidée",
-          click: () => goHome("tour").catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
+          click: () =>
+            goHome("tour").catch((error) => dialog.showErrorBox(APP_NAME, error.message)),
         },
       ],
     },

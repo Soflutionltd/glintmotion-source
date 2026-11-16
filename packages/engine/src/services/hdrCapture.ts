@@ -19,8 +19,10 @@
  * Performance: ~6 fps at 1080x1920 via base64 transfer.
  */
 
+import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
+import { buildChromeLaunchEnv } from "@hyperframes/core/chrome-env";
 import type { Page, Browser, PuppeteerNode } from "puppeteer-core";
-import { resolveFullChromePath, sigintLaunchOptions } from "./browserManager.js";
+import { resolveFullChromePath, ownedLaunchOptions } from "./browserManager.js";
 
 // ── PQ (SMPTE 2084) OETF ─────────────────────────────────────────────────────
 
@@ -241,15 +243,16 @@ export async function launchHdrBrowser(
   const chromePath = resolveFullChromePath();
   if (!chromePath) {
     throw new Error(
-      "[HDR] No Chrome binary found. Install: npx @puppeteer/browsers install chrome@stable",
+      "[HDR] Name a full Chrome in HYPERFRAMES_BROWSER_PATH: HDR capture does not start a cached browser.",
     );
   }
 
   const browser = await ppt.launch({
-    ...sigintLaunchOptions(),
+    ...ownedLaunchOptions(),
     headless: false,
     executablePath: chromePath,
-    args: buildHdrChromeArgs(width, height),
+    env: buildChromeLaunchEnv(),
+    args: withHyperframesBrowserMarker(buildHdrChromeArgs(width, height)),
   });
 
   const page = await browser.newPage();

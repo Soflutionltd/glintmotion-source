@@ -138,7 +138,7 @@ export const MotionCheckButton = memo(function MotionCheckButton() {
                   <span className="shrink-0 text-warning-ink">{ISSUE_LABELS[finding.issue]}</span>
                 </span>
                 <span className="font-mono text-[10px] tabular-nums text-panel-text-3">
-                  {finding.start.toFixed(2)}–{finding.end.toFixed(2)} s
+                  {finding.start.toFixed(2)} to {finding.end.toFixed(2)} s
                 </span>
                 <span className="text-[11px] leading-snug text-panel-text-2">{finding.hint}</span>
               </button>
